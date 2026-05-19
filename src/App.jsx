@@ -5,7 +5,7 @@ import {
   Clock, DollarSign, X, Plus, FileText, ExternalLink,
   LogOut, Bookmark, LayoutGrid, CheckCircle2, Lock, Verified,
   AlertCircle, Edit3, Upload, Paperclip, Handshake, Megaphone,
-  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar
+  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound
 } from 'lucide-react';
 
 const c = {
@@ -54,9 +54,9 @@ const JOB_TEMPLATES = [
 ];
 
 const PRICING = [
-  { name: 'Starter', price: 79, tagline: 'For single centers just getting started', features: ['Post up to 3 active jobs','Unlimited applications','Basic applicant filtering','Email support'], highlight: false },
-  { name: 'Growth', price: 129, tagline: 'For growing centers ready to hire faster', features: ['Post up to 10 active jobs','Featured listing placement','Advanced applicant filters','Messaging tools','Verification badges','Priority support'], highlight: true, badge: 'Most Popular' },
-  { name: 'Premier', price: 159, tagline: 'For multi center owners and franchises', features: ['Unlimited job posts','Top of search placement','Multi center dashboard','Applicant prescreening','Dedicated account manager','Phone, email, chat support'], highlight: false }
+  { name: 'Starter', price: 79, tagline: 'For single centers just getting started', features: ['Up to 3 active job posts','Basic applicant profiles','Email support','1 admin user','State licensing guide access','30 day free trial'], highlight: false },
+  { name: 'Professional', price: 129, tagline: 'For growing centers ready to hire faster', features: ['Up to 10 active job posts','Full applicant credentials and documents','Priority email and phone support','3 admin users','Featured listing badge','Background check verification status','Automated applicant messaging','30 day free trial'], highlight: true, badge: 'Most Popular' },
+  { name: 'Enterprise', price: 159, tagline: 'For multi center owners and franchises', features: ['Unlimited job posts','White-glove onboarding','Dedicated account manager','Unlimited admin users','Premium placement on Browse Jobs','Custom branding on listings','Advanced analytics dashboard','API access for HR systems','30 day free trial'], highlight: false }
 ];
 
 const AGE_GROUPS = ['Infant','Toddler','Preschool','Pre K','School Age'];
@@ -163,6 +163,7 @@ export default function App() {
   const [resetData, setResetData] = useState({ email: '', code: '', newPassword: '', confirmPassword: '', role: '' });
   const [resetError, setResetError] = useState('');
   const [resetSuccessToast, setResetSuccessToast] = useState(false);
+  const [guestBannerDismissed, setGuestBannerDismissed] = useState(false);
   // Messaging
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
@@ -215,6 +216,8 @@ export default function App() {
       if (list) setUserListings(list);
       const convs = await STORE.get('kk_conversations');
       if (convs) setConversations(convs);
+      const banner = await STORE.get('kk_guestBannerDismissed');
+      if (banner) setGuestBannerDismissed(true);
       setAppLoaded(true);
     })();
   }, []);
@@ -298,6 +301,20 @@ export default function App() {
 
   const completeSignup = async () => {
     setSignupError('');
+    const missing = [];
+    if (!signup.name) missing.push('your name');
+    if (!signup.email) missing.push('email');
+    if (!signup.phone) missing.push('phone');
+    if (!signup.password) missing.push('password');
+    if (userType === 'owner' && !signup.center) missing.push('center name');
+    if (missing.length > 0) {
+      setSignupError(`Please fill in: ${missing.join(', ')}.`);
+      return;
+    }
+    if (signup.password.length < 6) {
+      setSignupError('Password must be at least 6 characters.');
+      return;
+    }
     // Check if email already in use FOR THIS ROLE
     const existing = await ACCOUNTS.findByEmailAndRole(signup.email, userType);
     if (existing) {
@@ -314,6 +331,10 @@ export default function App() {
 
   const handleVerifyEmail = async () => {
     setCodeError('');
+    if (enteredCode.length !== 6) {
+      setCodeError('Enter the 6 digit code from your email.');
+      return;
+    }
     if (enteredCode !== verificationCode) {
       setCodeError("That code doesn't match. Check your email and try again.");
       return;
@@ -436,10 +457,12 @@ export default function App() {
     await STORE.del('kk_signup');
     await STORE.del('kk_profile');
     await STORE.del('kk_jobs');
+    await STORE.del('kk_guestBannerDismissed');
     setSignedIn(false); setProfileComplete(false); setUserType(null);
     setView('welcome'); setApplied([]); setSaved([]); setPosted([]); setPlan(null);
     setJobApplicants({});
     setIsPartner(false);
+    setGuestBannerDismissed(false);
     setProfile({ photo: '', city: '', state: 'Georgia', zip: '', years: '', ageGroups: [], education: '', credentials: [], bgCheck: '', availability: '', positions: [], bio: '', resume: '', credentialFiles: [] });
     setSignup({ name: '', email: '', phone: '', state: 'Georgia', center: '', password: '' });
   };
@@ -527,7 +550,10 @@ export default function App() {
 
   const Logo = ({ size = 'md', onDark = false }) => (
     <div className="flex items-center gap-2.5">
-      <div style={{ width: size === 'lg' ? 46 : 38, height: size === 'lg' ? 46 : 38, background: onDark ? c.white : `linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%)`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: onDark ? c.primary : c.white, fontSize: size === 'lg' ? 18 : 15, letterSpacing: '-0.04em', boxShadow: '0 2px 8px rgba(15, 42, 61, 0.12)' }}>RK</div>
+      <div style={{ width: size === 'lg' ? 46 : 38, height: size === 'lg' ? 46 : 38, background: onDark ? c.white : `linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%)`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: onDark ? c.primary : c.white, fontSize: size === 'lg' ? 18 : 15, letterSpacing: '-0.04em', boxShadow: '0 2px 8px rgba(15, 42, 61, 0.12)', position: 'relative' }}>
+        RK
+        <span style={{ position: 'absolute', top: size === 'lg' ? -3 : -2, right: size === 'lg' ? -3 : -2, color: c.gold, fontSize: size === 'lg' ? 13 : 11, lineHeight: 1, textShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>★</span>
+      </div>
       <div className="leading-tight">
         <div style={{ color: onDark ? c.white : c.navy, fontSize: size === 'lg' ? 17 : 14, fontWeight: 700, letterSpacing: '-0.015em' }}>
           Rellim KidKare <span style={{ color: onDark ? c.gold : c.primary }}>Konnect</span>
@@ -572,6 +598,9 @@ export default function App() {
             ))}
           </nav>
           <div className="flex items-center gap-1.5">
+            {(!signedIn || userType !== 'owner') && (
+              <button onClick={() => setView('pricing')} style={{ padding: '7px 10px', background: 'none', border: 'none', color: c.primary, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', borderRadius: 7 }}>Pricing</button>
+            )}
             {signedIn ? (
               <>
                 <Avatar name={signup.name || 'T B'} photo={profile.photo} size={34} />
@@ -585,16 +614,19 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="md:hidden flex overflow-x-auto border-t" style={{ borderColor: c.border }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => { setView('app'); setTab(t.id); }} style={{ flex: '1 0 auto', minWidth: 88, padding: '10px 6px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative' }}>
-              <div style={{ position: 'relative' }}>
-                <t.icon size={16} />
-                {t.badge > 0 && <span style={{ position: 'absolute', top: -4, right: -8, background: c.coral, color: c.white, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, minWidth: 14, textAlign: 'center' }}>{t.badge}</span>}
-              </div>
-              {t.label}
-            </button>
-          ))}
+        <div className="md:hidden relative" style={{ borderTop: `1px solid ${c.border}` }}>
+          <div className="flex overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={() => { setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
+                <div style={{ position: 'relative' }}>
+                  <t.icon size={16} />
+                  {t.badge > 0 && <span style={{ position: 'absolute', top: -4, right: -8, background: c.coral, color: c.white, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, minWidth: 14, textAlign: 'center' }}>{t.badge}</span>}
+                </div>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, background: `linear-gradient(to left, ${c.white}, rgba(255,255,255,0))`, pointerEvents: 'none' }} />
         </div>
       </header>
     );
@@ -631,6 +663,9 @@ export default function App() {
               <p style={{ fontSize: 16, color: c.textMuted, maxWidth: 560, margin: '0 auto 8px', lineHeight: 1.6 }}>
                 Connecting qualified daycare workers with licensed centers through industry specific matching and trusted training partners.
               </p>
+            </div>
+            <div className="relative" style={{ marginTop: 18 }}>
+              <HeroIllustration />
             </div>
           </div>
         </section>
@@ -709,12 +744,39 @@ export default function App() {
           </div>
         </section>
 
-        <footer style={{ background: c.navy, color: 'rgba(255,255,255,0.7)', padding: '32px 0' }}>
-          <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
-            <Logo onDark={true} />
-            <div style={{ fontSize: 13 }}>© 2026 Rellim KidKare Konnect · A Rellim company</div>
+        <section style={{ background: c.cream, borderTop: `1px solid ${c.border}` }}>
+          <div className="max-w-6xl mx-auto px-6 py-8">
+            <div className="text-center mb-5">
+              <div style={{ fontSize: 11.5, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>Why KidKare</div>
+              <h2 style={{ fontSize: 'clamp(20px, 3.5vw, 26px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.02em' }}>Built for trusted hiring</h2>
+            </div>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Shield size={18} color={c.primary} /></div>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy, marginBottom: 2 }}>Background check verified profiles</div>
+                  <div style={{ fontSize: 11.5, color: c.textMuted }}>Cleared status shown on every candidate.</div>
+                </div>
+              </div>
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#FBF0D8', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Building2 size={18} color={c.goldDark || c.gold} /></div>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy, marginBottom: 2 }}>Used by 12 centers across Georgia</div>
+                  <div style={{ fontSize: 11.5, color: c.textMuted }}>Growing weekly in our beta launch.</div>
+                </div>
+              </div>
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Verified size={18} color={c.primary} fill={c.gold} /></div>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy, marginBottom: 2 }}>DECAL informed</div>
+                  <div style={{ fontSize: 11.5, color: c.textMuted }}>Aligned with Georgia state licensing.</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </footer>
+        </section>
+
+        <Footer />
       </div>
     );
   }
@@ -756,15 +818,29 @@ export default function App() {
             Already have an account?{' '}<button onClick={() => setView('login')} style={{ color: c.primary, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Log in here</button>
           </p>
         </div>
+        <Footer />
       </div>
     );
   }
 
   // PARTNER SIGN UP
   if (view === 'partnerSignup') {
-    const ok = partnerSignup.name && partnerSignup.email && partnerSignup.phone && partnerSignup.password && partnerSignup.password.length >= 6 && partnerSignup.businessName;
     const handlePartnerSignup = async () => {
       setPartnerError('');
+      const missing = [];
+      if (!partnerSignup.name) missing.push('your name');
+      if (!partnerSignup.businessName) missing.push('business name');
+      if (!partnerSignup.email) missing.push('email');
+      if (!partnerSignup.phone) missing.push('phone');
+      if (!partnerSignup.password) missing.push('password');
+      if (missing.length > 0) {
+        setPartnerError(`Please fill in: ${missing.join(', ')}.`);
+        return;
+      }
+      if (partnerSignup.password.length < 6) {
+        setPartnerError('Password must be at least 6 characters.');
+        return;
+      }
       const existing = await ACCOUNTS.findByEmailAndRole(partnerSignup.email, 'partner');
       if (existing) {
         setPartnerError('A partner account already exists with this email. Try logging in instead.');
@@ -819,12 +895,13 @@ export default function App() {
             <div style={{ background: c.paleBlue, padding: 11, borderRadius: 9, marginTop: 14, fontSize: 12.5, color: c.primaryDark }}>
               <strong>Pricing:</strong> {partnerSignup.category === 'Advertising' ? '$99 for 30 days' : '$39.99/month'} after signup. Cancel anytime.
             </div>
-            <button onClick={handlePartnerSignup} disabled={!ok} style={{ width: '100%', marginTop: 16, padding: '12px', background: ok ? c.gold : c.textMuted, color: c.navy, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: ok ? 'pointer' : 'not-allowed' }}>Create Partner Account →</button>
+            <button onClick={handlePartnerSignup} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.gold, color: c.navy, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Create Partner Account →</button>
             <p style={{ textAlign: 'center', fontSize: 12.5, color: c.textMuted, marginTop: 12 }}>
               Already have a partner account?{' '}<button onClick={() => setView('partnerLogin')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>Log in here</button>
             </p>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -833,6 +910,10 @@ export default function App() {
   if (view === 'partnerLogin') {
     const handlePartnerLogin = async () => {
       setPartnerError('');
+      if (!partnerLoginForm.email || !partnerLoginForm.password) {
+        setPartnerError('Please enter your email and password to log in.');
+        return;
+      }
       const account = await ACCOUNTS.findByEmailAndRole(partnerLoginForm.email, 'partner');
       if (!account) {
         setPartnerError("We couldn't find a partner account with that email. Sign up to create one.");
@@ -878,7 +959,7 @@ export default function App() {
                 <input type="password" value={partnerLoginForm.password} onChange={e => setPartnerLoginForm({...partnerLoginForm, password: e.target.value})} placeholder="Your password" onKeyDown={e => e.key === 'Enter' && handlePartnerLogin()} style={{ width: '100%', padding: '9px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
               </div>
             </div>
-            <button onClick={handlePartnerLogin} disabled={!partnerLoginForm.email || !partnerLoginForm.password} style={{ width: '100%', marginTop: 16, padding: '12px', background: (!partnerLoginForm.email || !partnerLoginForm.password) ? c.textMuted : c.gold, color: c.navy, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (!partnerLoginForm.email || !partnerLoginForm.password) ? 'not-allowed' : 'pointer' }}>Log In as Partner</button>
+            <button onClick={handlePartnerLogin} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.gold, color: c.navy, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Log In as Partner</button>
             <div style={{ textAlign: 'center', margin: '14px 0 8px', position: 'relative' }}>
               <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, background: c.border }} />
               <span style={{ position: 'relative', background: c.white, padding: '0 12px', fontSize: 12, color: c.textMuted }}>or</span>
@@ -891,6 +972,7 @@ export default function App() {
             </p>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -899,6 +981,10 @@ export default function App() {
   if (view === 'login') {
     const handleLogin = async () => {
       setLoginError('');
+      if (!loginForm.email || !loginForm.password) {
+        setLoginError('Please enter your email and password to log in.');
+        return;
+      }
       const accounts = await ACCOUNTS.getAll();
       const matches = accounts.filter(a => a.email.toLowerCase() === loginForm.email.toLowerCase());
       if (matches.length === 0) {
@@ -959,8 +1045,8 @@ export default function App() {
             <div style={{ width: 48, height: 48, borderRadius: 12, background: c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
               <Lock size={22} color={c.primary} />
             </div>
-            <h2 style={{ fontSize: 24, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Welcome back</h2>
-            <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 20 }}>Log in to access your profile and job activity.</p>
+            <h2 style={{ fontSize: 24, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Welcome back to KidKare</h2>
+            <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 20 }}>Sign in to keep great childcare moving.</p>
 
             {loginError && (
               <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 14, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -986,7 +1072,7 @@ export default function App() {
               </label>
             </div>
 
-            <button onClick={handleLogin} disabled={!loginForm.email || !loginForm.password} style={{ width: '100%', marginTop: 18, padding: '12px', background: (!loginForm.email || !loginForm.password) ? c.textMuted : c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (!loginForm.email || !loginForm.password) ? 'not-allowed' : 'pointer' }}>Log In</button>
+            <button onClick={handleLogin} style={{ width: '100%', marginTop: 18, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Log In</button>
 
             <div style={{ textAlign: 'center', margin: '16px 0', position: 'relative' }}>
               <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 1, background: c.border }} />
@@ -1001,6 +1087,7 @@ export default function App() {
             </p>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -1009,6 +1096,10 @@ export default function App() {
   if (view === 'forgotPassword') {
     const sendResetCode = async () => {
       setResetError('');
+      if (!resetData.email) {
+        setResetError('Enter the email address on your account.');
+        return;
+      }
       const matches = (await ACCOUNTS.getAll()).filter(a => a.email.toLowerCase() === resetData.email.toLowerCase());
       if (matches.length === 0) {
         setResetError("We couldn't find an account with that email.");
@@ -1032,6 +1123,10 @@ export default function App() {
 
     const submitNewPassword = async () => {
       setResetError('');
+      if (!resetData.newPassword || !resetData.confirmPassword) {
+        setResetError('Please enter and confirm your new password.');
+        return;
+      }
       if (resetData.newPassword.length < 6) {
         setResetError('Password must be at least 6 characters.');
         return;
@@ -1057,21 +1152,22 @@ export default function App() {
         <div className="max-w-md mx-auto px-6 py-8">
           <button onClick={() => setView('login')} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back to login</button>
           <div style={{ background: c.white, borderRadius: 16, padding: 28, border: `1px solid ${c.border}` }}>
-            <div style={{ width: 48, height: 48, borderRadius: 12, background: c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
-              <Lock size={22} color={c.primary} />
+            <div style={{ width: 72, height: 72, borderRadius: '50%', background: c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <KeyRound size={32} color={c.primary} />
             </div>
 
             {resetStep === 'email' && (
               <>
-                <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Reset your password</h2>
-                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 18 }}>Enter your account email and we'll send a 6 digit reset code.</p>
+                <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5, textAlign: 'center' }}>Reset your password</h2>
+                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 6, textAlign: 'center' }}>We'll send a 6-digit code that expires in 15 minutes.</p>
+                <p style={{ color: c.textMuted, fontSize: 13, marginBottom: 18, textAlign: 'center' }}>Enter the email on your account.</p>
                 {resetError && (
                   <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />{resetError}
                   </div>
                 )}
                 <Input label="Email" value={resetData.email} onChange={v => setResetData({...resetData, email: v})} placeholder="you@example.com" type="email" />
-                <button onClick={sendResetCode} disabled={!resetData.email} style={{ width: '100%', marginTop: 16, padding: '12px', background: !resetData.email ? c.textMuted : c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: !resetData.email ? 'not-allowed' : 'pointer' }}>Send Reset Code</button>
+                <button onClick={sendResetCode} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Send Reset Code</button>
               </>
             )}
 
@@ -1092,7 +1188,7 @@ export default function App() {
                   <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>6 digit code</label>
                   <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.3em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} />
                 </div>
-                <button onClick={verifyResetCode} disabled={enteredCode.length !== 6} style={{ width: '100%', marginTop: 16, padding: '12px', background: enteredCode.length !== 6 ? c.textMuted : c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: enteredCode.length !== 6 ? 'not-allowed' : 'pointer' }}>Verify Code</button>
+                <button onClick={() => { if (enteredCode.length !== 6) { setResetError('Enter the 6 digit code from your email.'); return; } verifyResetCode(); }} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify Code</button>
               </>
             )}
 
@@ -1109,11 +1205,15 @@ export default function App() {
                   <Input label="New Password" value={resetData.newPassword} onChange={v => setResetData({...resetData, newPassword: v})} placeholder="At least 6 characters" type="password" />
                   <Input label="Confirm New Password" value={resetData.confirmPassword} onChange={v => setResetData({...resetData, confirmPassword: v})} placeholder="Re enter password" type="password" />
                 </div>
-                <button onClick={submitNewPassword} disabled={!resetData.newPassword || !resetData.confirmPassword} style={{ width: '100%', marginTop: 16, padding: '12px', background: (!resetData.newPassword || !resetData.confirmPassword) ? c.textMuted : c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (!resetData.newPassword || !resetData.confirmPassword) ? 'not-allowed' : 'pointer' }}>Reset Password</button>
+                <button onClick={submitNewPassword} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Reset Password</button>
               </>
             )}
+            <p style={{ textAlign: 'center', fontSize: 13, color: c.textMuted, marginTop: 18, paddingTop: 14, borderTop: `1px solid ${c.borderSoft}` }}>
+              Remember your password?{' '}<button onClick={() => setView('login')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>Back to login</button>
+            </p>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -1147,7 +1247,7 @@ export default function App() {
               <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.3em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} onKeyDown={e => e.key === 'Enter' && enteredCode.length === 6 && handleVerifyEmail()} />
             </div>
 
-            <button onClick={handleVerifyEmail} disabled={enteredCode.length !== 6} style={{ width: '100%', marginTop: 16, padding: '12px', background: enteredCode.length !== 6 ? c.textMuted : c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: enteredCode.length !== 6 ? 'not-allowed' : 'pointer' }}>Verify and Continue</button>
+            <button onClick={handleVerifyEmail} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify and Continue</button>
 
             <div className="flex justify-center items-center gap-2 mt-4" style={{ fontSize: 12.5, color: c.textMuted }}>
               Didn't receive it?
@@ -1158,13 +1258,13 @@ export default function App() {
             </p>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
 
   // SIGN UP
   if (view === 'signup') {
-    const ok = signup.name && signup.email && signup.phone && signup.password && signup.password.length >= 6 && (userType === 'worker' || signup.center);
     return (
       <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
         <Header />
@@ -1189,7 +1289,7 @@ export default function App() {
               <Select label="State" value={signup.state} onChange={v => setSignup({...signup, state: v})} options={STATES} />
               {userType === 'owner' && <Input label="Center Name" value={signup.center} onChange={v => setSignup({...signup, center: v})} placeholder="Little Leaders Academy" />}
             </div>
-            <button onClick={completeSignup} disabled={!ok} style={{ width: '100%', marginTop: 18, padding: '12px', background: ok ? c.primary : c.textMuted, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: ok ? 'pointer' : 'not-allowed' }}>{userType === 'owner' ? 'Continue to Pricing →' : 'Continue to Profile →'}</button>
+            <button onClick={completeSignup} style={{ width: '100%', marginTop: 18, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>{userType === 'owner' ? 'Continue to Pricing →' : 'Continue to Profile →'}</button>
             <p style={{ textAlign: 'center', fontSize: 12.5, color: c.textMuted, marginTop: 12 }}>
               Already have an account?{' '}<button onClick={() => setView('login')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>Log in here</button>
             </p>
@@ -1198,6 +1298,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -1315,44 +1416,64 @@ export default function App() {
             {pendingApply && <div style={{ marginTop: 10, padding: 11, background: c.paleBlue, borderRadius: 8, fontSize: 12.5, color: c.primaryDark, display: 'flex', alignItems: 'center', gap: 7 }}><AlertCircle size={14} /> We'll auto submit your application once saved.</div>}
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
 
   // PRICING
   if (view === 'pricing') {
+    const choosePlan = async (planName) => {
+      if (signedIn && userType === 'owner') {
+        setPlan(planName);
+        await STORE.set('kk_auth', { signedIn: true, userType, profileComplete, plan: planName });
+        setView('app');
+      } else {
+        setPlan(planName);
+        setUserType('owner');
+        setView('signup');
+      }
+    };
     return (
       <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
         <Header />
         <div className="max-w-6xl mx-auto px-6 py-9">
-          <div className="text-center mb-8">
-            <div style={{ fontSize: 12, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 7 }}>Subscription Plans</div>
-            <h2 style={{ fontSize: 'clamp(24px, 5vw, 34px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 6 }}>Pick your plan</h2>
-            <p style={{ fontSize: 14.5, color: c.textMuted }}>Cancel anytime. Upgrade or downgrade as needed.</p>
+          <div className="text-center mb-9">
+            <div style={{ fontSize: 12, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 7 }}>For Daycare Centers</div>
+            <h2 style={{ fontSize: 'clamp(26px, 5vw, 38px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 8 }}>Pick the plan that fits your center</h2>
+            <p style={{ fontSize: 14.5, color: c.textMuted, maxWidth: 560, margin: '0 auto' }}>All plans include a 30 day free trial. Cancel anytime. Upgrade or downgrade as your hiring needs change.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-4 max-w-5xl mx-auto">
+          <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto" style={{ alignItems: 'stretch' }}>
             {PRICING.map((t, i) => (
-              <div key={i} style={{ background: t.highlight ? `linear-gradient(180deg, ${c.primary} 0%, ${c.primaryDark} 100%)` : c.white, border: t.highlight ? `2px solid ${c.primary}` : `1.5px solid ${c.border}`, borderRadius: 14, padding: 24, position: 'relative', transform: t.highlight ? 'translateY(-6px)' : 'none' }}>
-                {t.badge && <div style={{ position: 'absolute', top: -11, left: '50%', transform: 'translateX(-50%)', background: c.gold, color: c.navy, fontSize: 10.5, fontWeight: 700, padding: '4px 12px', borderRadius: 999, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t.badge}</div>}
-                <div style={{ color: t.highlight ? c.gold : c.primary, fontSize: 11.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 7 }}>{t.name}</div>
-                <div className="flex items-baseline gap-1 mb-2">
-                  <span style={{ fontSize: 36, fontWeight: 800, color: t.highlight ? c.white : c.navy, letterSpacing: '-0.03em' }}>${t.price}</span>
-                  <span style={{ fontSize: 13, color: t.highlight ? 'rgba(255,255,255,0.7)' : c.textMuted }}>/ month</span>
+              <div key={i} style={{ background: t.highlight ? `linear-gradient(180deg, ${c.primary} 0%, ${c.primaryDark} 100%)` : c.white, border: t.highlight ? `2px solid ${c.primary}` : `1.5px solid ${c.border}`, borderRadius: 16, padding: '28px 22px 22px', position: 'relative', transform: t.highlight ? 'translateY(-8px)' : 'none', boxShadow: t.highlight ? '0 14px 36px rgba(43, 95, 126, 0.25)' : '0 2px 6px rgba(15, 42, 61, 0.05)', display: 'flex', flexDirection: 'column' }}>
+                {t.badge && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: c.gold, color: c.navy, fontSize: 11, fontWeight: 800, padding: '5px 14px', borderRadius: 999, letterSpacing: '0.08em', textTransform: 'uppercase', boxShadow: '0 4px 10px rgba(212, 165, 71, 0.45)' }}>{t.badge}</div>}
+                <div style={{ color: t.highlight ? c.gold : c.primary, fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>{t.name}</div>
+                <div className="flex items-baseline gap-1" style={{ marginBottom: 2 }}>
+                  <span style={{ fontSize: 44, fontWeight: 800, color: t.highlight ? c.white : c.navy, letterSpacing: '-0.035em' }}>${t.price}</span>
                 </div>
-                <p style={{ color: t.highlight ? 'rgba(255,255,255,0.85)' : c.textMuted, fontSize: 12.5, marginBottom: 16, lineHeight: 1.5, minHeight: 34 }}>{t.tagline}</p>
-                <button onClick={async () => { setPlan(t.name); await STORE.set('kk_auth', { signedIn: true, userType, profileComplete, plan: t.name }); setView('app'); }} style={{ width: '100%', padding: '10px', background: t.highlight ? c.gold : c.primary, color: t.highlight ? c.navy : c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', marginBottom: 16 }}>Start with {t.name}</button>
-                <div className="space-y-2">
+                <div style={{ fontSize: 13, color: t.highlight ? 'rgba(255,255,255,0.78)' : c.textMuted, marginBottom: 10 }}>per month</div>
+                <p style={{ color: t.highlight ? 'rgba(255,255,255,0.85)' : c.textMuted, fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>{t.tagline}</p>
+                <div className="space-y-2" style={{ flex: 1, marginBottom: 18 }}>
                   {t.features.map((f, j) => (
-                    <div key={j} className="flex items-start gap-2">
-                      <div style={{ flexShrink: 0, width: 15, height: 15, borderRadius: '50%', background: t.highlight ? c.gold : c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}><Check size={9} color={t.highlight ? c.navy : c.primary} strokeWidth={3} /></div>
-                      <span style={{ fontSize: 12.5, color: t.highlight ? 'rgba(255,255,255,0.92)' : c.text, lineHeight: 1.4 }}>{f}</span>
+                    <div key={j} className="flex items-start gap-2.5">
+                      <div style={{ flexShrink: 0, width: 17, height: 17, borderRadius: '50%', background: t.highlight ? c.gold : c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}><Check size={10} color={t.highlight ? c.navy : c.primary} strokeWidth={3} /></div>
+                      <span style={{ fontSize: 13, color: t.highlight ? 'rgba(255,255,255,0.95)' : c.text, lineHeight: 1.45 }}>{f}</span>
                     </div>
                   ))}
                 </div>
+                <button onClick={() => choosePlan(t.name)} style={{ width: '100%', padding: '12px', background: t.highlight ? c.gold : c.primary, color: t.highlight ? c.navy : c.white, border: 'none', borderRadius: 11, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  Choose {t.name} <ArrowRight size={14} />
+                </button>
               </div>
             ))}
           </div>
+          <div className="text-center" style={{ marginTop: 28 }}>
+            <p style={{ fontSize: 13, color: c.textMuted }}>
+              Questions about plans?{' '}<button onClick={() => alert('Contact: Coming soon!')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer' }}>Contact our team</button>
+            </p>
+          </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -1361,9 +1482,12 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
       <Header />
-      {!signedIn && (
-        <div style={{ background: c.gold, color: c.navy, padding: '9px 14px', textAlign: 'center', fontSize: 12.5, fontWeight: 600 }}>
+      {!signedIn && !guestBannerDismissed && (
+        <div style={{ background: c.gold, color: c.navy, padding: '9px 40px 9px 14px', textAlign: 'center', fontSize: 12.5, fontWeight: 600, position: 'relative' }}>
           Browsing as guest. <button onClick={() => setView('roleChoice')} style={{ color: c.navy, textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 12.5 }}>Sign up or log in</button> to apply.
+          <button onClick={async () => { setGuestBannerDismissed(true); await STORE.set('kk_guestBannerDismissed', true); }} aria-label="Dismiss guest banner" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'rgba(15,42,61,0.08)', border: 'none', cursor: 'pointer', color: c.navy, padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <X size={14} />
+          </button>
         </div>
       )}
       {showSaveToast && (
@@ -2096,6 +2220,7 @@ export default function App() {
           </div>
         </Modal>
       )}
+      <Footer />
     </div>
   );
 }
@@ -2160,6 +2285,69 @@ function DetailBox({ label, children }) {
       <div style={{ fontSize: 10.5, fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
       <div style={{ padding: 12, background: c.cream, borderRadius: 9 }}>{children}</div>
     </div>
+  );
+}
+
+function Footer() {
+  // TODO: Build real About, Contact, Privacy, Terms, Help pages
+  const handleLink = (name) => alert(`${name}: Coming soon!`);
+  const links = ['About', 'Contact', 'Privacy', 'Terms', 'Help'];
+  return (
+    <footer style={{ background: c.navy, color: 'rgba(255,255,255,0.7)', padding: '32px 0', marginTop: 40 }}>
+      <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2.5">
+            <div style={{ width: 38, height: 38, background: c.white, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: c.primary, fontSize: 15, letterSpacing: '-0.04em', position: 'relative' }}>
+              RK
+              <span style={{ position: 'absolute', top: -2, right: -2, color: c.gold, fontSize: 11, lineHeight: 1 }}>★</span>
+            </div>
+            <div style={{ color: c.white, fontSize: 14, fontWeight: 700 }}>Rellim KidKare <span style={{ color: c.gold }}>Konnect</span></div>
+          </div>
+          <div className="flex flex-wrap" style={{ gap: '4px 16px' }}>
+            {links.map(l => (
+              <button key={l} type="button" onClick={() => handleLink(l)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.78)', padding: 0, fontSize: 13, fontWeight: 500 }}>{l}</button>
+            ))}
+          </div>
+          <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.55)' }}>© 2026 Rellim KidKare Konnect · A Rellim company</div>
+        </div>
+        <div style={{ fontSize: 14, color: c.gold, fontWeight: 600, fontStyle: 'italic' }}>Where Great Childcare Begins</div>
+      </div>
+    </footer>
+  );
+}
+
+function HeroIllustration() {
+  // TODO: Replace with real hero photo from Pexels/Unsplash when ready
+  return (
+    <svg viewBox="0 0 600 280" role="img" aria-label="Illustration of a teacher with children" style={{ width: '100%', maxWidth: 600, height: 'auto', display: 'block', margin: '4px auto 0' }} xmlns="http://www.w3.org/2000/svg">
+      <circle cx="110" cy="58" r="34" fill={c.gold} opacity="0.55" />
+      <ellipse cx="470" cy="48" rx="56" ry="14" fill={c.white} opacity="0.7" />
+      <ellipse cx="430" cy="60" rx="38" ry="11" fill={c.white} opacity="0.55" />
+      <path d="M 0 240 Q 300 215 600 240 L 600 280 L 0 280 Z" fill={c.paleBlue} />
+      <path d="M 0 252 Q 300 232 600 252 L 600 280 L 0 280 Z" fill={c.lightBlue} opacity="0.7" />
+      <circle cx="180" cy="148" r="30" fill={c.coral} />
+      <path d="M 150 178 Q 180 168 210 178 L 220 268 Q 180 274 140 268 Z" fill={c.primary} />
+      <circle cx="172" cy="143" r="3" fill={c.navy} />
+      <circle cx="188" cy="143" r="3" fill={c.navy} />
+      <path d="M 173 156 Q 180 161 187 156" stroke={c.navy} strokeWidth="2" fill="none" strokeLinecap="round" />
+      <circle cx="290" cy="186" r="22" fill={c.gold} />
+      <path d="M 268 208 Q 290 200 312 208 L 318 270 Q 290 274 262 270 Z" fill={c.coral} />
+      <circle cx="284" cy="183" r="2.4" fill={c.navy} />
+      <circle cx="296" cy="183" r="2.4" fill={c.navy} />
+      <path d="M 285 193 Q 290 197 295 193" stroke={c.navy} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <circle cx="370" cy="178" r="24" fill={c.primary} />
+      <path d="M 346 202 Q 370 193 394 202 L 400 268 Q 370 274 340 268 Z" fill={c.gold} />
+      <circle cx="363" cy="175" r="2.6" fill={c.white} />
+      <circle cx="377" cy="175" r="2.6" fill={c.white} />
+      <path d="M 363 186 Q 370 191 377 186" stroke={c.white} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <path d="M 460 122 C 460 110 472 104 478 113 C 484 104 496 110 496 122 C 496 136 478 154 478 154 C 478 154 460 136 460 122 Z" fill={c.coral} />
+      <polygon points="520,165 524.5,176.5 537,177.5 527.5,186 530.5,198 520,191 509.5,198 512.5,186 503,177.5 515.5,176.5" fill={c.gold} />
+      <rect x="46" y="226" width="22" height="22" rx="3" fill={c.gold} />
+      <rect x="70" y="226" width="22" height="22" rx="3" fill={c.coral} />
+      <rect x="46" y="202" width="22" height="22" rx="3" fill={c.primary} />
+      <circle cx="540" cy="232" r="14" fill={c.gold} opacity="0.85" />
+      <path d="M 528 232 a 12 12 0 1 0 24 0" fill="none" stroke={c.white} strokeWidth="2" />
+    </svg>
   );
 }
 
