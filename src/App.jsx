@@ -593,17 +593,16 @@ export default function App() {
   };
 
   const Logo = ({ size = 'md', onDark = false }) => (
-    <div className="flex items-center gap-2.5">
-      <div style={{ width: size === 'lg' ? 46 : 38, height: size === 'lg' ? 46 : 38, background: onDark ? c.white : `linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%)`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: onDark ? c.primary : c.white, fontSize: size === 'lg' ? 18 : 15, letterSpacing: '-0.04em', boxShadow: '0 2px 8px rgba(15, 42, 61, 0.12)', position: 'relative' }}>
-        RK
-        <span style={{ position: 'absolute', top: size === 'lg' ? -3 : -2, right: size === 'lg' ? -3 : -2, color: c.gold, fontSize: size === 'lg' ? 13 : 11, lineHeight: 1, textShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>★</span>
-      </div>
-      <div className="leading-tight">
-        <div style={{ color: onDark ? c.white : c.navy, fontSize: size === 'lg' ? 17 : 14, fontWeight: 700, letterSpacing: '-0.015em' }}>
-          Rellim KidKare <span style={{ color: onDark ? c.gold : c.primary }}>Konnect</span>
-        </div>
-      </div>
-    </div>
+    <img
+      src="/logo.png"
+      alt="Rellim KidKare Konnect"
+      style={{
+        height: size === 'lg' ? 110 : 52,
+        width: 'auto',
+        display: 'block',
+        maxWidth: '100%'
+      }}
+    />
   );
 
   const buildTabs = () => {
@@ -631,7 +630,7 @@ export default function App() {
     const tabs = buildTabs();
     return (
       <header style={{ background: c.white, borderBottom: `1px solid ${c.border}`, position: 'sticky', top: 0, zIndex: 50 }}>
-        <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 flex items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between gap-2" style={{ minHeight: 68 }}>
           <button onClick={() => setView(signedIn ? 'app' : 'welcome')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><Logo /></button>
           <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
             {tabs.map(t => (
@@ -2385,11 +2384,14 @@ function Footer() {
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2.5">
-            <div style={{ width: 38, height: 38, background: c.white, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: c.primary, fontSize: 15, letterSpacing: '-0.04em', position: 'relative' }}>
-              RK
-              <span style={{ position: 'absolute', top: -2, right: -2, color: c.gold, fontSize: 11, lineHeight: 1 }}>★</span>
+            <div style={{ width: 40, height: 40, background: c.white, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: '#FF8C42', letterSpacing: '-0.05em', marginRight: -1 }}>R</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: c.navy, letterSpacing: '-0.05em' }}>K</span>
+              <Heart size={8} fill="#FF8C42" color="#FF8C42" style={{ position: 'absolute', bottom: 4, right: 5 }} />
             </div>
-            <div style={{ color: c.white, fontSize: 14, fontWeight: 700 }}>Rellim KidKare <span style={{ color: c.gold }}>Konnect</span></div>
+            <div style={{ color: c.white, fontSize: 15, fontWeight: 800, letterSpacing: '-0.01em' }}>
+              Rellim <span style={{ color: '#FF8C42' }}>KidKare</span> Konnect
+            </div>
           </div>
           <div className="flex flex-wrap" style={{ gap: '4px 16px' }}>
             {links.map(l => (

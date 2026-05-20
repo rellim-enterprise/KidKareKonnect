@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#2B5F7E"/>
-  <text x="32" y="42" font-family="system-ui, sans-serif" font-size="28" font-weight="800" fill="white" text-anchor="middle" letter-spacing="-1">RK</text>
-  <polygon points="50,8 51.8,12.6 56.7,13 53,16.2 54.1,21 50,18.4 45.9,21 47,16.2 43.3,13 48.2,12.6" fill="#D4A547"/>
+  <rect width="64" height="64" rx="14" fill="#FFFFFF"/>
+  <text x="20" y="44" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="800" fill="#FF8C42" letter-spacing="-2">R</text>
+  <text x="36" y="44" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="800" fill="#0F2A3D" letter-spacing="-2">K</text>
+  <path d="M 28 49 C 28 46.5 31 45.5 32 47.5 C 33 45.5 36 46.5 36 49 C 36 52.5 32 56 32 56 C 32 56 28 52.5 28 49 Z" fill="#FF8C42"/>
 </svg>
