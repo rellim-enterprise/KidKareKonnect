@@ -692,24 +692,31 @@ export default function App() {
     return (
       <div style={{ background: c.cream, fontFamily: 'system-ui, sans-serif', minHeight: '100vh' }}>
         <Header />
-        <section style={{ background: `linear-gradient(180deg, ${c.paleBlue} 0%, ${c.cream} 100%)`, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: -100, right: -100, width: 400, height: 400, borderRadius: '50%', background: `radial-gradient(circle, ${c.lightBlue} 0%, transparent 70%)`, opacity: 0.6 }} />
-          <div className="max-w-6xl mx-auto px-6 pt-12 pb-10 relative">
-            <div className="text-center max-w-3xl mx-auto">
-              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-5" style={{ background: c.white, border: `1px solid ${c.border}`, color: c.primary, fontSize: 12.5, fontWeight: 600 }}>
-                <Verified size={13} fill={c.gold} stroke={c.white} strokeWidth={2.5} />
-                The Premier Daycare Hiring Platform
+        <section style={{ background: 'linear-gradient(135deg, #FFF8EE 0%, #FAF6EE 55%, #FFE9D2 100%)', position: 'relative', overflow: 'hidden' }}>
+          <div aria-hidden style={{ position: 'absolute', top: -140, right: -120, width: 460, height: 460, borderRadius: '50%', background: 'radial-gradient(circle, #FFD166 0%, transparent 70%)', opacity: 0.45, pointerEvents: 'none' }} />
+          <div aria-hidden style={{ position: 'absolute', bottom: -160, left: -120, width: 380, height: 380, borderRadius: '50%', background: 'radial-gradient(circle, #FF8C42 0%, transparent 70%)', opacity: 0.22, pointerEvents: 'none' }} />
+          <div className="max-w-6xl mx-auto px-6 pt-12 pb-14 relative">
+            <div className="grid md:grid-cols-2 gap-10 items-center">
+              <div className="text-center md:text-left">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-5" style={{ background: c.white, border: `1px solid ${c.border}`, color: c.primary, fontSize: 12.5, fontWeight: 600 }}>
+                  <Verified size={13} fill={c.gold} stroke={c.white} strokeWidth={2.5} />
+                  The Premier Daycare Hiring Platform
+                </div>
+                <h1 style={{ fontSize: 'clamp(32px, 5.5vw, 56px)', fontWeight: 800, color: c.navy, lineHeight: 1.05, letterSpacing: '-0.035em', marginBottom: 16 }}>
+                  Where Great<br/>
+                  <span style={{ background: 'linear-gradient(135deg, #2B5F7E 0%, #FF8C42 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Childcare Begins</span>
+                </h1>
+                <p style={{ fontSize: 16.5, color: c.textMuted, lineHeight: 1.6, marginBottom: 6, maxWidth: 520 }}>
+                  Connecting qualified daycare workers with licensed centers through industry specific matching and trusted training partners.
+                </p>
               </div>
-              <h1 style={{ fontSize: 'clamp(32px, 5.5vw, 56px)', fontWeight: 800, color: c.navy, lineHeight: 1.05, letterSpacing: '-0.035em', marginBottom: 16 }}>
-                Where Great<br/>
-                <span style={{ background: `linear-gradient(135deg, ${c.primary} 0%, ${c.coralDark} 100%)`, WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Childcare Begins</span>
-              </h1>
-              <p style={{ fontSize: 16, color: c.textMuted, maxWidth: 560, margin: '0 auto 8px', lineHeight: 1.6 }}>
-                Connecting qualified daycare workers with licensed centers through industry specific matching and trusted training partners.
-              </p>
-            </div>
-            <div className="relative" style={{ marginTop: 18 }}>
-              <HeroIllustration />
+              <div className="relative">
+                <div aria-hidden style={{ position: 'absolute', top: -18, right: -18, width: 120, height: 120, borderRadius: '50%', background: '#FFD166', opacity: 0.7, zIndex: 0 }} />
+                <div aria-hidden style={{ position: 'absolute', bottom: -22, left: -22, width: 95, height: 95, borderRadius: '50%', background: '#FF8C42', opacity: 0.48, zIndex: 0 }} />
+                <div style={{ position: 'relative', zIndex: 1 }}>
+                  <HeroPhoto />
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -2393,72 +2400,31 @@ function Footer() {
   );
 }
 
-function HeroIllustration() {
-  // TODO: Replace with real hero photo from Pexels/Unsplash when ready
-  const sunYellow = '#FFD166';
-  const tangerine = '#FF8C42';
-  const softPeach = '#FBE5D2';
+function HeroPhoto() {
+  // TODO: Replace this Unsplash CDN URL with your own licensed or owned photo.
+  // The fallback below renders cleanly if the network request fails so the layout
+  // never breaks. Photo by Element5 Digital on Unsplash (free for commercial use).
+  const photoUrl = 'https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=1000&q=80';
+  const [failed, setFailed] = useState(false);
   return (
-    <svg viewBox="0 0 600 220" role="img" aria-label="Childcare learning illustration" style={{ width: '100%', maxWidth: 560, height: 'auto', display: 'block', margin: '6px auto 0', filter: 'drop-shadow(0 6px 18px rgba(15,42,61,0.08))' }} xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <radialGradient id="sunGlow" cx="50%" cy="35%" r="65%">
-          <stop offset="0%" stopColor={sunYellow} stopOpacity="0.55" />
-          <stop offset="55%" stopColor={tangerine} stopOpacity="0.18" />
-          <stop offset="100%" stopColor={tangerine} stopOpacity="0" />
-        </radialGradient>
-        <linearGradient id="bookSpine" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={c.primary} />
-          <stop offset="100%" stopColor={c.primaryDark} />
-        </linearGradient>
-      </defs>
-
-      <rect x="0" y="0" width="600" height="220" fill="url(#sunGlow)" />
-
-      <circle cx="500" cy="62" r="42" fill={sunYellow} opacity="0.9" />
-      <circle cx="500" cy="62" r="30" fill={c.white} opacity="0.22" />
-
-      <polygon points="78,52 82,62 92.5,62.5 84.5,69.5 87,80 78,74 69,80 71.5,69.5 63.5,62.5 74,62" fill={tangerine} opacity="0.85" />
-      <polygon points="430,30 432.5,37 440,37.5 434.5,42.5 436.5,49.5 430,46 423.5,49.5 425.5,42.5 420,37.5 427.5,37" fill={sunYellow} opacity="0.8" />
-      <polygon points="160,72 162,77.5 168,78 163.5,82 165,88 160,85 155,88 156.5,82 152,78 158,77.5" fill={c.gold} opacity="0.7" />
-
-      <path d="M 444 108 C 444 96 458 89 466 100 C 474 89 488 96 488 110 C 488 126 466 148 466 148 C 466 148 444 126 444 108 Z" fill={tangerine} opacity="0.92" />
-      <path d="M 450 116 C 450 110 456 107 459 112 C 462 107 468 110 468 117 C 468 125 459 134 459 134 C 459 134 450 125 450 116 Z" fill={c.white} opacity="0.35" />
-
-      <g transform="translate(58, 110)">
-        <path d="M 0 6 L 0 70 L 50 64 L 50 8 Q 25 -2 0 6 Z" fill="url(#bookSpine)" />
-        <path d="M 100 6 L 100 70 L 50 64 L 50 8 Q 75 -2 100 6 Z" fill={c.primary} />
-        <line x1="10" y1="20" x2="44" y2="17" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
-        <line x1="10" y1="30" x2="44" y2="27" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
-        <line x1="10" y1="40" x2="44" y2="37" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
-        <line x1="10" y1="50" x2="44" y2="47" stroke={c.white} strokeWidth="1.4" opacity="0.45" />
-        <line x1="56" y1="17" x2="90" y2="20" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
-        <line x1="56" y1="27" x2="90" y2="30" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
-        <line x1="56" y1="37" x2="90" y2="40" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
-        <line x1="56" y1="47" x2="90" y2="50" stroke={c.white} strokeWidth="1.4" opacity="0.45" />
-      </g>
-
-      <g>
-        <rect x="226" y="120" width="64" height="64" rx="11" fill={sunYellow} />
-        <rect x="226" y="120" width="64" height="64" rx="11" fill={c.white} opacity="0.18" />
-        <text x="258" y="166" fontFamily="system-ui, sans-serif" fontSize="36" fontWeight="800" fill={c.navy} textAnchor="middle">A</text>
-
-        <rect x="298" y="108" width="64" height="64" rx="11" fill={tangerine} />
-        <rect x="298" y="108" width="64" height="64" rx="11" fill={c.white} opacity="0.14" />
-        <text x="330" y="154" fontFamily="system-ui, sans-serif" fontSize="36" fontWeight="800" fill={c.white} textAnchor="middle">B</text>
-
-        <rect x="370" y="120" width="64" height="64" rx="11" fill={c.primary} />
-        <rect x="370" y="120" width="64" height="64" rx="11" fill={c.white} opacity="0.1" />
-        <text x="402" y="166" fontFamily="system-ui, sans-serif" fontSize="36" fontWeight="800" fill={c.white} textAnchor="middle">C</text>
-      </g>
-
-      <g transform="translate(170, 168)">
-        <rect x="0" y="0" width="42" height="14" rx="3" fill={c.coral} />
-        <rect x="0" y="0" width="42" height="14" rx="3" fill={c.white} opacity="0.18" />
-      </g>
-
-      <path d="M 0 198 Q 300 184 600 198 L 600 220 L 0 220 Z" fill={softPeach} opacity="0.85" />
-      <path d="M 0 208 Q 300 196 600 208 L 600 220 L 0 220 Z" fill={c.paleBlue} opacity="0.7" />
-    </svg>
+    <div style={{ position: 'relative', borderRadius: 22, overflow: 'hidden', boxShadow: '0 24px 60px rgba(15,42,61,0.18)', aspectRatio: '4 / 3', background: 'linear-gradient(135deg, #FFE9C9 0%, #FFD0A3 100%)', width: '100%' }}>
+      {!failed ? (
+        <img
+          src={photoUrl}
+          alt="Multicultural children engaged in classroom learning with a teacher"
+          loading="lazy"
+          onError={() => setFailed(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+        />
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 28, textAlign: 'center' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,255,255,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+            <Heart size={28} color="#FF6E2B" fill="#FF8C42" />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: c.navy, lineHeight: 1.3, maxWidth: 280 }}>Where every classroom is a place to grow</div>
+        </div>
+      )}
+    </div>
   );
 }
 
