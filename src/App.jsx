@@ -54,9 +54,9 @@ const JOB_TEMPLATES = [
 ];
 
 const PRICING = [
-  { name: 'Starter', price: 79, tagline: 'For single centers just getting started', features: ['Up to 3 active job posts','Basic applicant profiles','Email support','1 admin user','State licensing guide access','30 day free trial'], highlight: false },
-  { name: 'Professional', price: 129, tagline: 'For growing centers ready to hire faster', features: ['Up to 10 active job posts','Full applicant credentials and documents','Priority email and phone support','3 admin users','Featured listing badge','Background check verification status','Automated applicant messaging','30 day free trial'], highlight: true, badge: 'Most Popular' },
-  { name: 'Enterprise', price: 159, tagline: 'For multi center owners and franchises', features: ['Unlimited job posts','White-glove onboarding','Dedicated account manager','Unlimited admin users','Premium placement on Browse Jobs','Custom branding on listings','Advanced analytics dashboard','API access for HR systems','30 day free trial'], highlight: false }
+  { name: 'Starter', price: 79, tagline: 'For single centers just getting started', features: ['Up to 3 active job posts','Basic applicant profiles','Email support','1 admin user','State licensing guide access','7 day free trial'], highlight: false },
+  { name: 'Professional', price: 129, tagline: 'For growing centers ready to hire faster', features: ['Up to 10 active job posts','Full applicant credentials and documents','Priority email and phone support','3 admin users','Featured listing badge','Background check verification status','Automated applicant messaging','7 day free trial'], highlight: true, badge: 'Most Popular' },
+  { name: 'Enterprise', price: 159, tagline: 'For multi center owners and franchises', features: ['Unlimited job posts','White-glove onboarding','Dedicated account manager','Unlimited admin users','Premium placement on Browse Jobs','Custom branding on listings','Advanced analytics dashboard','API access for HR systems','7 day free trial'], highlight: false }
 ];
 
 const AGE_GROUPS = ['Infant','Toddler','Preschool','Pre K','School Age'];
@@ -635,7 +635,7 @@ export default function App() {
           <button onClick={() => setView(signedIn ? 'app' : 'welcome')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><Logo /></button>
           <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
             {tabs.map(t => (
-              <button key={t.id} onClick={() => { setView('app'); setTab(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 8, background: view === 'app' && tab === t.id ? c.paleBlue : 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.text, fontSize: 13, fontWeight: view === 'app' && tab === t.id ? 700 : 500, border: 'none', cursor: 'pointer', position: 'relative' }}>
+              <button key={t.id} onClick={() => { if (!signedIn) { setView('roleChoice'); return; } setView('app'); setTab(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 8, background: view === 'app' && tab === t.id ? c.paleBlue : 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.text, fontSize: 13, fontWeight: view === 'app' && tab === t.id ? 700 : 500, border: 'none', cursor: 'pointer', position: 'relative' }}>
                 <t.icon size={14} />{t.label}
                 {t.badge > 0 && <span style={{ background: c.coral, color: c.white, fontSize: 9.5, fontWeight: 700, padding: '1px 6px', borderRadius: 999, marginLeft: 2 }}>{t.badge}</span>}
               </button>
@@ -661,7 +661,7 @@ export default function App() {
         <div className="md:hidden relative" style={{ borderTop: `1px solid ${c.border}` }}>
           <div className="flex overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             {tabs.map(t => (
-              <button key={t.id} onClick={() => { setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
+              <button key={t.id} onClick={() => { if (!signedIn) { setView('roleChoice'); return; } setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
                 <div style={{ position: 'relative' }}>
                   <t.icon size={16} />
                   {t.badge > 0 && <span style={{ position: 'absolute', top: -4, right: -8, background: c.coral, color: c.white, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, minWidth: 14, textAlign: 'center' }}>{t.badge}</span>}
@@ -1514,7 +1514,10 @@ export default function App() {
           <div className="text-center mb-9">
             <div style={{ fontSize: 12, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 7 }}>For Daycare Centers</div>
             <h2 style={{ fontSize: 'clamp(26px, 5vw, 38px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 8 }}>Pick the plan that fits your center</h2>
-            <p style={{ fontSize: 14.5, color: c.textMuted, maxWidth: 560, margin: '0 auto' }}>All plans include a 30 day free trial. Cancel anytime. Upgrade or downgrade as your hiring needs change.</p>
+            <p style={{ fontSize: 14.5, color: c.textMuted, maxWidth: 560, margin: '0 auto' }}>Every plan starts with a 7 day free trial. Cancel anytime. Upgrade or downgrade as your hiring needs change.</p>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 14, padding: '6px 14px', background: c.success, color: c.white, borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: '0.05em' }}>
+              <CheckCircle2 size={13} /> 7-DAY FREE TRIAL · NO CHARGE TODAY
+            </div>
           </div>
           <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto" style={{ alignItems: 'stretch' }}>
             {PRICING.map((t, i) => (
@@ -1535,8 +1538,9 @@ export default function App() {
                   ))}
                 </div>
                 <button onClick={() => choosePlan(t.name)} style={{ width: '100%', padding: '12px', background: t.highlight ? c.gold : c.primary, color: t.highlight ? c.navy : c.white, border: 'none', borderRadius: 11, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  Choose {t.name} <ArrowRight size={14} />
+                  Start 7-Day Free Trial <ArrowRight size={14} />
                 </button>
+                <div style={{ textAlign: 'center', marginTop: 8, fontSize: 11.5, color: t.highlight ? 'rgba(255,255,255,0.75)' : c.textMuted }}>Then ${t.price}/month · Cancel anytime</div>
               </div>
             ))}
           </div>
