@@ -2401,18 +2401,15 @@ function Footer() {
 }
 
 function HeroPhoto() {
-  // TODO: Replace this Unsplash CDN URL with your own licensed or owned photo.
-  // The fallback below renders cleanly if the network request fails so the layout
-  // never breaks. Photo by Element5 Digital on Unsplash (free for commercial use).
-  const photoUrl = 'https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=1000&q=80';
+  // Photo lives at public/hero.jpg and ships with the build.
   const [failed, setFailed] = useState(false);
   return (
-    <div style={{ position: 'relative', borderRadius: 22, overflow: 'hidden', boxShadow: '0 24px 60px rgba(15,42,61,0.18)', aspectRatio: '4 / 3', background: 'linear-gradient(135deg, #FFE9C9 0%, #FFD0A3 100%)', width: '100%' }}>
+    <div style={{ position: 'relative', borderRadius: 22, overflow: 'hidden', boxShadow: '0 24px 60px rgba(15,42,61,0.18)', aspectRatio: '3 / 2', background: 'linear-gradient(135deg, #FFE9C9 0%, #FFD0A3 100%)', width: '100%' }}>
       {!failed ? (
         <img
-          src={photoUrl}
-          alt="Multicultural children engaged in classroom learning with a teacher"
-          loading="lazy"
+          src="/hero.jpg"
+          alt="A teacher reading a book to five multicultural preschool children in a sunlit classroom"
+          loading="eager"
           onError={() => setFailed(true)}
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
