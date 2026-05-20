@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Briefcase, GraduationCap, MapPin, Users, Search, Heart, Send,
   Check, Award, Shield, BookOpen, Building2, User, ArrowRight,
@@ -164,6 +164,47 @@ export default function App() {
   const [resetError, setResetError] = useState('');
   const [resetSuccessToast, setResetSuccessToast] = useState(false);
   const [guestBannerDismissed, setGuestBannerDismissed] = useState(false);
+
+  // Browser back/forward integration. Each setView pushes a history entry,
+  // popstate restores the view, so the browser back button (and the in-app
+  // back arrow via window.history.back()) returns to the previous view.
+  const skipPushRef = useRef(false);
+  const ourPushCountRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!window.history.state || !window.history.state.kkView) {
+      window.history.replaceState({ kkView: view }, '');
+    }
+    const onPop = (e) => {
+      const target = e.state && e.state.kkView;
+      if (target) {
+        skipPushRef.current = true;
+        setView(target);
+        if (ourPushCountRef.current > 0) ourPushCountRef.current -= 1;
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!appLoaded) return;
+    if (skipPushRef.current) { skipPushRef.current = false; return; }
+    if (window.history.state && window.history.state.kkView === view) return;
+    window.history.pushState({ kkView: view }, '');
+    ourPushCountRef.current += 1;
+  }, [view, appLoaded]);
+
+  const goBack = () => {
+    if (typeof window !== 'undefined' && ourPushCountRef.current > 0) {
+      window.history.back();
+    } else {
+      setView(signedIn ? 'app' : 'welcome');
+    }
+  };
   // Messaging
   const [conversations, setConversations] = useState([]);
   const [activeConvId, setActiveConvId] = useState(null);
@@ -523,18 +564,21 @@ export default function App() {
 
   const myUnreadCount = myConversations.reduce((sum, c) => sum + ((c.unreadFor || []).includes(signup.email) ? 1 : 0), 0);
 
-  let visibleJobs = SAMPLE_JOBS;
-  if (signedIn && userType === 'worker' && profileComplete && locationFilter === 'myArea') {
-    visibleJobs = SAMPLE_JOBS.filter(j => j.state === profile.state);
-  }
-  visibleJobs = visibleJobs.filter(j => {
-    const s = jobSearch === '' || [j.title, j.location, j.center].some(v => v.toLowerCase().includes(jobSearch.toLowerCase()));
-    const f = jobFilter === 'all' || j.type === jobFilter;
-    return s && f;
-  });
+  const visibleJobs = useMemo(() => {
+    let jobs = SAMPLE_JOBS;
+    if (signedIn && userType === 'worker' && profileComplete && locationFilter === 'myArea' && profile.state) {
+      jobs = SAMPLE_JOBS.filter(j => j.state === profile.state);
+    }
+    const q = (jobSearch || '').toLowerCase();
+    return jobs.filter(j => {
+      const s = !q || [j.title, j.location, j.center].some(v => (v || '').toLowerCase().includes(q));
+      const f = jobFilter === 'all' || j.type === jobFilter;
+      return s && f;
+    });
+  }, [signedIn, userType, profileComplete, locationFilter, profile.state, jobSearch, jobFilter]);
 
-  const allPartners = [...userListings, ...PARTNERS];
-  const filteredPartners = partnerCat === 'All' ? allPartners : allPartners.filter(p => p.category === partnerCat);
+  const allPartners = useMemo(() => [...userListings, ...PARTNERS], [userListings]);
+  const filteredPartners = useMemo(() => partnerCat === 'All' ? allPartners : allPartners.filter(p => p.category === partnerCat), [partnerCat, allPartners]);
   const info = STATE_LICENSING[stateSel] || { ...DEFAULT_INFO, agency: `${stateSel} Department of Child Care Licensing`, website: 'childcare.gov', backgroundCheck: { ...DEFAULT_INFO.backgroundCheck, link: 'childcare.gov' } };
 
   // AVATAR helper
@@ -598,7 +642,7 @@ export default function App() {
             ))}
           </nav>
           <div className="flex items-center gap-1.5">
-            {(!signedIn || userType !== 'owner') && (
+            {(!signedIn || userType === 'owner') && (
               <button onClick={() => setView('pricing')} style={{ padding: '7px 10px', background: 'none', border: 'none', color: c.primary, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', borderRadius: 7 }}>Pricing</button>
             )}
             {signedIn ? (
@@ -787,6 +831,7 @@ export default function App() {
       <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
         <Header />
         <div className="max-w-4xl mx-auto px-6 py-10">
+          <button onClick={goBack} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back</button>
           <div className="text-center mb-7">
             <h2 style={{ fontSize: 'clamp(24px, 4vw, 32px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 6 }}>How are you joining us?</h2>
             <p style={{ fontSize: 15, color: c.textMuted }}>Pick the option that fits you.</p>
@@ -1224,6 +1269,7 @@ export default function App() {
       <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
         <Header />
         <div className="max-w-md mx-auto px-6 py-8">
+          <button onClick={() => setView('signup')} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back to signup</button>
           <div style={{ background: c.white, borderRadius: 16, padding: 28, border: `1px solid ${c.border}` }}>
             <div style={{ width: 56, height: 56, borderRadius: 14, background: c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
               <Mail size={26} color={c.primary} />
@@ -1310,6 +1356,9 @@ export default function App() {
       <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
         <Header />
         <div className="max-w-2xl mx-auto px-4 md:px-6 py-6">
+          {profileComplete && (
+            <button onClick={() => setView('app')} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back to jobs</button>
+          )}
           <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
             <div>
               <div className="flex items-center gap-2 mb-1" style={{ fontSize: 11, fontWeight: 700, color: c.success, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
@@ -1364,7 +1413,7 @@ export default function App() {
 
             <Section icon={Award} title="Credentials" sub="Mark what you currently hold.">
               <ChipGroup label="Current Credentials" items={CREDENTIALS_LIST} selected={profile.credentials} onChange={item => setProfile({...profile, credentials: toggleArr(profile.credentials, item)})} />
-              <Select label="Background Check Status" value={profile.bgCheck} onChange={v => setProfile({...profile, bgCheck: v})} options={['Cleared and current','In progress','Not started yet']} placeholder="Select" />
+              <Select label="Background Check Status" value={profile.bgCheck} onChange={v => setProfile({...profile, bgCheck: v})} options={['Cleared and current','Portable background check','In progress','Not started yet']} placeholder="Select" />
             </Section>
 
             <Section icon={Paperclip} title="Documents" sub="Upload resume and certificates. Centers see these when you apply.">
@@ -1423,6 +1472,22 @@ export default function App() {
 
   // PRICING
   if (view === 'pricing') {
+    if (signedIn && userType === 'worker') {
+      return (
+        <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
+          <Header />
+          <div className="max-w-md mx-auto px-6 py-12 text-center">
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: c.lightBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Heart size={28} color={c.primary} fill={c.coral} />
+            </div>
+            <h2 style={{ fontSize: 24, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 8 }}>You're set — for free</h2>
+            <p style={{ color: c.textMuted, fontSize: 14, lineHeight: 1.55, marginBottom: 18 }}>Subscription plans are for daycare centers that post jobs. As a teacher or caregiver, you get full access to KidKare at no cost — forever.</p>
+            <button onClick={() => setView('app')} style={{ padding: '11px 22px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>Back to my jobs</button>
+          </div>
+          <Footer />
+        </div>
+      );
+    }
     const choosePlan = async (planName) => {
       if (signedIn && userType === 'owner') {
         setPlan(planName);
@@ -1438,6 +1503,7 @@ export default function App() {
       <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
         <Header />
         <div className="max-w-6xl mx-auto px-6 py-9">
+          <button onClick={goBack} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back</button>
           <div className="text-center mb-9">
             <div style={{ fontSize: 12, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 7 }}>For Daycare Centers</div>
             <h2 style={{ fontSize: 'clamp(26px, 5vw, 38px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 8 }}>Pick the plan that fits your center</h2>
@@ -1887,6 +1953,11 @@ export default function App() {
                       <Verified size={11} fill={c.white} stroke={c.success} /> Bg Check Cleared
                     </div>
                   )}
+                  {profile.bgCheck === 'Portable background check' && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', background: c.coralDark, color: c.white, borderRadius: 999, fontSize: 11, fontWeight: 700, marginBottom: 10 }}>
+                      <Shield size={11} /> Portable Check · Ready to Start
+                    </div>
+                  )}
                   <div style={{ paddingTop: 12, marginTop: 12, borderTop: `1px solid ${c.border}`, fontSize: 12.5, color: c.textMuted, textAlign: 'left' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}><span>Experience</span><strong style={{ color: c.text }}>{profile.years || 'Not set'}</strong></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}><span>Availability</span><strong style={{ color: c.text }}>{profile.availability || 'Not set'}</strong></div>
@@ -1946,7 +2017,7 @@ export default function App() {
 
                 <Section icon={Award} title="Credentials" sub="Mark what you currently hold.">
                   <ChipGroup label="Current Credentials" items={CREDENTIALS_LIST} selected={profile.credentials} onChange={item => setProfile({...profile, credentials: toggleArr(profile.credentials, item)})} />
-                  <Select label="Background Check Status" value={profile.bgCheck} onChange={v => setProfile({...profile, bgCheck: v})} options={['Cleared and current','In progress','Not started yet']} placeholder="Select" />
+                  <Select label="Background Check Status" value={profile.bgCheck} onChange={v => setProfile({...profile, bgCheck: v})} options={['Cleared and current','Portable background check','In progress','Not started yet']} placeholder="Select" />
                 </Section>
 
                 <Section icon={Paperclip} title="Documents" sub="Resume and certificates.">
@@ -2064,6 +2135,11 @@ export default function App() {
                       <Verified size={11} fill={c.white} stroke={c.success} /> Background Check Cleared
                     </div>
                   )}
+                  {viewingApplicantDetail.bgCheck === 'Portable background check' && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 7, padding: '4px 10px', background: c.coralDark, color: c.white, borderRadius: 999, fontSize: 11.5, fontWeight: 700 }}>
+                      <Shield size={11} /> Portable Background Check · Ready to Start
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2166,6 +2242,7 @@ export default function App() {
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <div style={{ fontSize: 14.5, fontWeight: 700, color: c.navy }}>{a.name}</div>
                           {a.bgCheck === 'Cleared and current' && <Verified size={13} fill={c.success} stroke={c.white} strokeWidth={2.5} />}
+                          {a.bgCheck === 'Portable background check' && <span title="Portable background check" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', background: c.coralDark, color: c.white, borderRadius: 999, fontSize: 9.5, fontWeight: 700 }}><Shield size={9} /> Portable</span>}
                         </div>
                         <div className="flex flex-wrap gap-x-2.5 gap-y-0.5" style={{ fontSize: 11.5, color: c.textMuted }}>
                           <span className="flex items-center gap-1"><MapPin size={10} /> {a.city}, {a.state}</span>
@@ -2318,35 +2395,69 @@ function Footer() {
 
 function HeroIllustration() {
   // TODO: Replace with real hero photo from Pexels/Unsplash when ready
+  const sunYellow = '#FFD166';
+  const tangerine = '#FF8C42';
+  const softPeach = '#FBE5D2';
   return (
-    <svg viewBox="0 0 600 280" role="img" aria-label="Illustration of a teacher with children" style={{ width: '100%', maxWidth: 600, height: 'auto', display: 'block', margin: '4px auto 0' }} xmlns="http://www.w3.org/2000/svg">
-      <circle cx="110" cy="58" r="34" fill={c.gold} opacity="0.55" />
-      <ellipse cx="470" cy="48" rx="56" ry="14" fill={c.white} opacity="0.7" />
-      <ellipse cx="430" cy="60" rx="38" ry="11" fill={c.white} opacity="0.55" />
-      <path d="M 0 240 Q 300 215 600 240 L 600 280 L 0 280 Z" fill={c.paleBlue} />
-      <path d="M 0 252 Q 300 232 600 252 L 600 280 L 0 280 Z" fill={c.lightBlue} opacity="0.7" />
-      <circle cx="180" cy="148" r="30" fill={c.coral} />
-      <path d="M 150 178 Q 180 168 210 178 L 220 268 Q 180 274 140 268 Z" fill={c.primary} />
-      <circle cx="172" cy="143" r="3" fill={c.navy} />
-      <circle cx="188" cy="143" r="3" fill={c.navy} />
-      <path d="M 173 156 Q 180 161 187 156" stroke={c.navy} strokeWidth="2" fill="none" strokeLinecap="round" />
-      <circle cx="290" cy="186" r="22" fill={c.gold} />
-      <path d="M 268 208 Q 290 200 312 208 L 318 270 Q 290 274 262 270 Z" fill={c.coral} />
-      <circle cx="284" cy="183" r="2.4" fill={c.navy} />
-      <circle cx="296" cy="183" r="2.4" fill={c.navy} />
-      <path d="M 285 193 Q 290 197 295 193" stroke={c.navy} strokeWidth="1.8" fill="none" strokeLinecap="round" />
-      <circle cx="370" cy="178" r="24" fill={c.primary} />
-      <path d="M 346 202 Q 370 193 394 202 L 400 268 Q 370 274 340 268 Z" fill={c.gold} />
-      <circle cx="363" cy="175" r="2.6" fill={c.white} />
-      <circle cx="377" cy="175" r="2.6" fill={c.white} />
-      <path d="M 363 186 Q 370 191 377 186" stroke={c.white} strokeWidth="1.8" fill="none" strokeLinecap="round" />
-      <path d="M 460 122 C 460 110 472 104 478 113 C 484 104 496 110 496 122 C 496 136 478 154 478 154 C 478 154 460 136 460 122 Z" fill={c.coral} />
-      <polygon points="520,165 524.5,176.5 537,177.5 527.5,186 530.5,198 520,191 509.5,198 512.5,186 503,177.5 515.5,176.5" fill={c.gold} />
-      <rect x="46" y="226" width="22" height="22" rx="3" fill={c.gold} />
-      <rect x="70" y="226" width="22" height="22" rx="3" fill={c.coral} />
-      <rect x="46" y="202" width="22" height="22" rx="3" fill={c.primary} />
-      <circle cx="540" cy="232" r="14" fill={c.gold} opacity="0.85" />
-      <path d="M 528 232 a 12 12 0 1 0 24 0" fill="none" stroke={c.white} strokeWidth="2" />
+    <svg viewBox="0 0 600 220" role="img" aria-label="Childcare learning illustration" style={{ width: '100%', maxWidth: 560, height: 'auto', display: 'block', margin: '6px auto 0', filter: 'drop-shadow(0 6px 18px rgba(15,42,61,0.08))' }} xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="sunGlow" cx="50%" cy="35%" r="65%">
+          <stop offset="0%" stopColor={sunYellow} stopOpacity="0.55" />
+          <stop offset="55%" stopColor={tangerine} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={tangerine} stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="bookSpine" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c.primary} />
+          <stop offset="100%" stopColor={c.primaryDark} />
+        </linearGradient>
+      </defs>
+
+      <rect x="0" y="0" width="600" height="220" fill="url(#sunGlow)" />
+
+      <circle cx="500" cy="62" r="42" fill={sunYellow} opacity="0.9" />
+      <circle cx="500" cy="62" r="30" fill={c.white} opacity="0.22" />
+
+      <polygon points="78,52 82,62 92.5,62.5 84.5,69.5 87,80 78,74 69,80 71.5,69.5 63.5,62.5 74,62" fill={tangerine} opacity="0.85" />
+      <polygon points="430,30 432.5,37 440,37.5 434.5,42.5 436.5,49.5 430,46 423.5,49.5 425.5,42.5 420,37.5 427.5,37" fill={sunYellow} opacity="0.8" />
+      <polygon points="160,72 162,77.5 168,78 163.5,82 165,88 160,85 155,88 156.5,82 152,78 158,77.5" fill={c.gold} opacity="0.7" />
+
+      <path d="M 444 108 C 444 96 458 89 466 100 C 474 89 488 96 488 110 C 488 126 466 148 466 148 C 466 148 444 126 444 108 Z" fill={tangerine} opacity="0.92" />
+      <path d="M 450 116 C 450 110 456 107 459 112 C 462 107 468 110 468 117 C 468 125 459 134 459 134 C 459 134 450 125 450 116 Z" fill={c.white} opacity="0.35" />
+
+      <g transform="translate(58, 110)">
+        <path d="M 0 6 L 0 70 L 50 64 L 50 8 Q 25 -2 0 6 Z" fill="url(#bookSpine)" />
+        <path d="M 100 6 L 100 70 L 50 64 L 50 8 Q 75 -2 100 6 Z" fill={c.primary} />
+        <line x1="10" y1="20" x2="44" y2="17" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
+        <line x1="10" y1="30" x2="44" y2="27" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
+        <line x1="10" y1="40" x2="44" y2="37" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
+        <line x1="10" y1="50" x2="44" y2="47" stroke={c.white} strokeWidth="1.4" opacity="0.45" />
+        <line x1="56" y1="17" x2="90" y2="20" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
+        <line x1="56" y1="27" x2="90" y2="30" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
+        <line x1="56" y1="37" x2="90" y2="40" stroke={c.white} strokeWidth="1.4" opacity="0.6" />
+        <line x1="56" y1="47" x2="90" y2="50" stroke={c.white} strokeWidth="1.4" opacity="0.45" />
+      </g>
+
+      <g>
+        <rect x="226" y="120" width="64" height="64" rx="11" fill={sunYellow} />
+        <rect x="226" y="120" width="64" height="64" rx="11" fill={c.white} opacity="0.18" />
+        <text x="258" y="166" fontFamily="system-ui, sans-serif" fontSize="36" fontWeight="800" fill={c.navy} textAnchor="middle">A</text>
+
+        <rect x="298" y="108" width="64" height="64" rx="11" fill={tangerine} />
+        <rect x="298" y="108" width="64" height="64" rx="11" fill={c.white} opacity="0.14" />
+        <text x="330" y="154" fontFamily="system-ui, sans-serif" fontSize="36" fontWeight="800" fill={c.white} textAnchor="middle">B</text>
+
+        <rect x="370" y="120" width="64" height="64" rx="11" fill={c.primary} />
+        <rect x="370" y="120" width="64" height="64" rx="11" fill={c.white} opacity="0.1" />
+        <text x="402" y="166" fontFamily="system-ui, sans-serif" fontSize="36" fontWeight="800" fill={c.white} textAnchor="middle">C</text>
+      </g>
+
+      <g transform="translate(170, 168)">
+        <rect x="0" y="0" width="42" height="14" rx="3" fill={c.coral} />
+        <rect x="0" y="0" width="42" height="14" rx="3" fill={c.white} opacity="0.18" />
+      </g>
+
+      <path d="M 0 198 Q 300 184 600 198 L 600 220 L 0 220 Z" fill={softPeach} opacity="0.85" />
+      <path d="M 0 208 Q 300 196 600 208 L 600 220 L 0 220 Z" fill={c.paleBlue} opacity="0.7" />
     </svg>
   );
 }
