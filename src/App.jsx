@@ -2383,15 +2383,8 @@ function Footer() {
     <footer style={{ background: c.navy, color: 'rgba(255,255,255,0.7)', padding: '32px 0', marginTop: 40 }}>
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2.5">
-            <div style={{ width: 40, height: 40, background: c.white, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
-              <span style={{ fontSize: 18, fontWeight: 800, color: '#FF8C42', letterSpacing: '-0.05em', marginRight: -1 }}>R</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: c.navy, letterSpacing: '-0.05em' }}>K</span>
-              <Heart size={8} fill="#FF8C42" color="#FF8C42" style={{ position: 'absolute', bottom: 4, right: 5 }} />
-            </div>
-            <div style={{ color: c.white, fontSize: 15, fontWeight: 800, letterSpacing: '-0.01em' }}>
-              Rellim <span style={{ color: '#FF8C42' }}>KidKare</span> Konnect
-            </div>
+          <div style={{ background: c.white, padding: '10px 16px', borderRadius: 12, display: 'inline-flex', alignSelf: 'flex-start', boxShadow: '0 4px 14px rgba(0,0,0,0.18)' }}>
+            <img src="/logo.png" alt="Rellim KidKare Konnect" style={{ height: 56, width: 'auto', display: 'block' }} />
           </div>
           <div className="flex flex-wrap" style={{ gap: '4px 16px' }}>
             {links.map(l => (
