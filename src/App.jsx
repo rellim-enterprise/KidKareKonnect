@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { supabase } from './supabase';
 import {
   Briefcase, GraduationCap, MapPin, Users, Search, Heart, Send,
   Check, Award, Shield, BookOpen, Building2, User, ArrowRight,
@@ -93,38 +94,72 @@ const STORE = {
   }
 };
 
-// Account helpers - proper multi-account system keyed by email + role
-const ACCOUNTS = {
-  async getAll() {
-    return (await STORE.get('kk_accounts')) || [];
-  },
-  async findByEmail(email) {
-    const all = await this.getAll();
-    return all.find(a => a.email.toLowerCase() === (email || '').toLowerCase());
-  },
-  async findByEmailAndRole(email, role) {
-    const all = await this.getAll();
-    return all.find(a => a.email.toLowerCase() === (email || '').toLowerCase() && a.role === role);
-  },
-  async save(account) {
-    const all = await this.getAll();
-    const idx = all.findIndex(a => a.email.toLowerCase() === account.email.toLowerCase() && a.role === account.role);
-    if (idx >= 0) all[idx] = account;
-    else all.push(account);
-    await STORE.set('kk_accounts', all);
-    return account;
-  },
-  async updatePassword(email, role, newPassword) {
-    const all = await this.getAll();
-    const idx = all.findIndex(a => a.email.toLowerCase() === email.toLowerCase() && a.role === role);
-    if (idx >= 0) {
-      all[idx].password = newPassword;
-      await STORE.set('kk_accounts', all);
-      return true;
-    }
-    return false;
-  }
-};
+// Account helpers — backed by Supabase Auth + a `profiles` table that mirrors
+// auth.users with the app-specific fields (name, phone, role, state, center).
+// A Postgres trigger on auth.users inserts the matching profiles row on signup,
+// so we never have to write directly to the table from the client.
+async function kkSupabaseSignUp({ email, password, role, name, phone, state, center, businessName, category }) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        name: name || '',
+        phone: phone || '',
+        role,
+        state: state || '',
+        center: center || '',
+        business_name: businessName || '',
+        category: category || '',
+      },
+    },
+  });
+  return { data, error };
+}
+
+async function kkSupabaseVerifyEmail({ email, token }) {
+  // After signUp, Supabase sends an email containing a 6-digit token (and
+  // a magic link). Either confirms the user; we use the token for parity
+  // with the existing UX.
+  return supabase.auth.verifyOtp({ email, token, type: 'email' });
+}
+
+async function kkSupabaseLogin({ email, password }) {
+  return supabase.auth.signInWithPassword({ email, password });
+}
+
+async function kkSupabaseRequestPasswordReset(email) {
+  return supabase.auth.resetPasswordForEmail(email);
+}
+
+async function kkSupabaseVerifyRecovery({ email, token }) {
+  return supabase.auth.verifyOtp({ email, token, type: 'recovery' });
+}
+
+async function kkSupabaseUpdatePassword(password) {
+  return supabase.auth.updateUser({ password });
+}
+
+async function kkLoadProfile(userId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+  return { data, error };
+}
+
+function mapSupabaseError(err, fallback) {
+  if (!err) return fallback || 'Something went wrong. Please try again.';
+  const msg = (err.message || '').toLowerCase();
+  if (msg.includes('invalid login')) return "That email and password combination doesn't match an account.";
+  if (msg.includes('email not confirmed')) return 'Please verify your email — check your inbox for the code we sent.';
+  if (msg.includes('user already registered')) return 'An account already exists for this email. Try logging in instead.';
+  if (msg.includes('rate limit')) return 'Too many attempts — please wait a moment and try again.';
+  if (msg.includes('token has expired') || msg.includes('invalid token')) return "That code didn't match or has expired. Request a new one and try again.";
+  if (msg.includes('password should be at least')) return 'Password must be at least 6 characters.';
+  return err.message || fallback || 'Something went wrong. Please try again.';
+}
 
 export default function App() {
   const [appLoaded, setAppLoaded] = useState(false);
@@ -229,24 +264,52 @@ export default function App() {
   // Load from storage on mount
   useEffect(() => {
     (async () => {
-      const auth = await STORE.get('kk_auth');
-      if (auth) {
-        // Only auto sign in if rememberMe was checked
-        if (auth.rememberMe !== false && auth.signedIn) {
-          setSignedIn(true);
-          setUserType(auth.userType || null);
-          setProfileComplete(auth.profileComplete || false);
-          setPlan(auth.plan || null);
-          setView('app');
-        } else {
-          // Keep userType/plan loaded but require fresh login
+      // 1) Resolve the real Supabase session first. If the user has a live
+      // session, we hydrate from their profile row, not from localStorage.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && session.user) {
+        const { data: profileRow } = await kkLoadProfile(session.user.id);
+        const role = profileRow?.role || session.user.user_metadata?.role || 'worker';
+        const email = session.user.email || '';
+        setSignedIn(true);
+        setUserType(role);
+        setIsPartner(role === 'partner');
+        setSignup({
+          name: profileRow?.name || session.user.user_metadata?.name || '',
+          email,
+          phone: profileRow?.phone || session.user.user_metadata?.phone || '',
+          state: profileRow?.state || session.user.user_metadata?.state || 'Georgia',
+          center: profileRow?.center || profileRow?.business_name || session.user.user_metadata?.center || '',
+          password: '',
+        });
+        if (role === 'worker') {
+          const savedProfile = await STORE.get(`kk_profile_${email}`);
+          if (savedProfile) {
+            setProfile(savedProfile);
+            setProfileComplete(true);
+          }
+        }
+        if (role === 'owner') {
+          const ownerData = await STORE.get(`kk_owner_${email}`);
+          if (ownerData) {
+            setPosted(ownerData.posted || []);
+            setJobApplicants(ownerData.jobApplicants || {});
+            setPlan(ownerData.plan || null);
+          }
+        }
+        setView('app');
+      } else {
+        // No live session — fall back to the legacy localStorage hints just
+        // so existing remembered signups keep working until they re-log in.
+        const auth = await STORE.get('kk_auth');
+        if (auth) {
           setUserType(auth.userType || null);
           setProfileComplete(auth.profileComplete || false);
           setPlan(auth.plan || null);
         }
       }
       const sign = await STORE.get('kk_signup');
-      if (sign) setSignup(sign);
+      if (sign) setSignup(prev => prev.email ? prev : sign);
       const prof = await STORE.get('kk_profile');
       if (prof) setProfile(prof);
       const jobs = await STORE.get('kk_jobs');
@@ -377,15 +440,32 @@ export default function App() {
       setSignupError('Password must be at least 6 characters.');
       return;
     }
-    // Check if email already in use FOR THIS ROLE
-    const existing = await ACCOUNTS.findByEmailAndRole(signup.email, userType);
-    if (existing) {
-      setSignupError(`A ${userType === 'worker' ? 'teacher' : 'daycare center'} account already exists with this email. Try logging in instead.`);
+    const { data, error } = await kkSupabaseSignUp({
+      email: signup.email,
+      password: signup.password,
+      role: userType,
+      name: signup.name,
+      phone: signup.phone,
+      state: signup.state,
+      center: signup.center || '',
+    });
+    if (error) {
+      setSignupError(mapSupabaseError(error));
       return;
     }
-    // Generate 6-digit verification code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setVerificationCode(code);
+    // If Supabase returned a session already (email confirmation is OFF in
+    // the project settings), skip the verify-email screen and route straight.
+    if (data && data.session) {
+      setSignedIn(true);
+      await STORE.set('kk_signup', signup);
+      if (userType === 'owner') {
+        if (!plan) setView('pricing'); else setView('app');
+      } else {
+        setProfile({ ...profile, state: signup.state });
+        setView('profile');
+      }
+      return;
+    }
     setEnteredCode('');
     setCodeError('');
     setView('verifyEmail');
@@ -397,38 +477,35 @@ export default function App() {
       setCodeError('Enter the 6 digit code from your email.');
       return;
     }
-    if (enteredCode !== verificationCode) {
-      setCodeError("That code doesn't match. Check your email and try again.");
+    const { error } = await kkSupabaseVerifyEmail({ email: signup.email, token: enteredCode });
+    if (error) {
+      setCodeError(mapSupabaseError(error));
       return;
     }
-    // SAVE THE ACCOUNT to accounts list
-    await ACCOUNTS.save({
-      email: signup.email,
-      password: signup.password,
-      role: userType,
-      name: signup.name,
-      phone: signup.phone,
-      state: signup.state,
-      center: signup.center || '',
-      createdAt: new Date().toISOString(),
-      emailVerified: true
-    });
+    // verifyOtp on success establishes a session. onAuthStateChange will
+    // mirror that into local state, but go ahead and route now for snappier UX.
     setSignedIn(true);
-    await STORE.set('kk_auth', { signedIn: true, userType, profileComplete: false, plan: null, emailVerified: true, currentEmail: signup.email });
-    await STORE.set('kk_signup', signup); // keep current session sync
-    if (userType === 'owner') {
+    await STORE.set('kk_signup', signup);
+    if (userType === 'partner') {
+      setView('app');
+      setTab('partners');
+      setShowListBiz(true);
+    } else if (userType === 'owner') {
       if (!plan) setView('pricing'); else setView('app');
     } else {
-      setProfile({...profile, state: signup.state});
+      setProfile({ ...profile, state: signup.state });
       setView('profile');
     }
   };
 
-  const resendCode = () => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    setVerificationCode(code);
-    setEnteredCode('');
+  const resendCode = async () => {
     setCodeError('');
+    const { error } = await supabase.auth.resend({ type: 'signup', email: signup.email });
+    if (error) {
+      setCodeError(mapSupabaseError(error));
+      return;
+    }
+    setEnteredCode('');
   };
 
   const completeProfile = async () => {
@@ -514,6 +591,7 @@ export default function App() {
   const removeCredFile = (name) => setProfile({...profile, credentialFiles: profile.credentialFiles.filter(f => f !== name)});
 
   const signOut = async () => {
+    await supabase.auth.signOut();
     // Only clear session, preserve accounts list and per-account data
     await STORE.del('kk_auth');
     await STORE.del('kk_signup');
@@ -1221,12 +1299,7 @@ export default function App() {
         setPartnerError('Password must be at least 6 characters.');
         return;
       }
-      const existing = await ACCOUNTS.findByEmailAndRole(partnerSignup.email, 'partner');
-      if (existing) {
-        setPartnerError('A partner account already exists with this email. Try logging in instead.');
-        return;
-      }
-      await ACCOUNTS.save({
+      const { data, error } = await kkSupabaseSignUp({
         email: partnerSignup.email,
         password: partnerSignup.password,
         role: 'partner',
@@ -1234,18 +1307,25 @@ export default function App() {
         phone: partnerSignup.phone,
         businessName: partnerSignup.businessName,
         category: partnerSignup.category,
-        createdAt: new Date().toISOString()
       });
-      setSignedIn(true);
-      setIsPartner(true);
+      if (error) {
+        setPartnerError(mapSupabaseError(error));
+        return;
+      }
       setUserType('partner');
+      setIsPartner(true);
       setSignup({ name: partnerSignup.name, email: partnerSignup.email, phone: partnerSignup.phone, password: partnerSignup.password, state: 'Georgia', center: partnerSignup.businessName });
-      await STORE.set('kk_auth', { signedIn: true, userType: 'partner', isPartner: true, currentEmail: partnerSignup.email, rememberMe: false });
-      setView('app');
-      setTab('partners');
-      // Open list business modal right away
       setNewListing({ category: partnerSignup.category, name: partnerSignup.businessName, tagline: '', description: '', website: '', phone: partnerSignup.phone });
-      setShowListBiz(true);
+      if (data && data.session) {
+        setSignedIn(true);
+        setView('app');
+        setTab('partners');
+        setShowListBiz(true);
+        return;
+      }
+      setEnteredCode('');
+      setCodeError('');
+      setView('verifyEmail');
     };
 
     return (
@@ -1294,20 +1374,33 @@ export default function App() {
         setPartnerError('Please enter your email and password to log in.');
         return;
       }
-      const account = await ACCOUNTS.findByEmailAndRole(partnerLoginForm.email, 'partner');
-      if (!account) {
-        setPartnerError("We couldn't find a partner account with that email. Sign up to create one.");
+      const { data, error } = await kkSupabaseLogin({
+        email: partnerLoginForm.email,
+        password: partnerLoginForm.password,
+      });
+      if (error) {
+        setPartnerError(mapSupabaseError(error));
         return;
       }
-      if (account.password !== partnerLoginForm.password) {
-        setPartnerError("That password doesn't match. Try again.");
+      const user = data?.user;
+      const { data: profileRow } = await kkLoadProfile(user.id);
+      if (profileRow && profileRow.role !== 'partner') {
+        setPartnerError("This email is registered to a different account type. Use the regular login.");
+        await supabase.auth.signOut();
         return;
       }
       setSignedIn(true);
       setIsPartner(true);
       setUserType('partner');
-      setSignup({ name: account.name, email: account.email, phone: account.phone, password: account.password, state: 'Georgia', center: account.businessName });
-      await STORE.set('kk_auth', { signedIn: true, userType: 'partner', isPartner: true, currentEmail: account.email });
+      setSignup({
+        name: profileRow?.name || '',
+        email: user.email,
+        phone: profileRow?.phone || '',
+        password: '',
+        state: profileRow?.state || 'Georgia',
+        center: profileRow?.business_name || profileRow?.center || '',
+      });
+      await STORE.set('kk_auth', { signedIn: true, userType: 'partner', isPartner: true, currentEmail: user.email });
       setPartnerLoginForm({ email: '', password: '' });
       setView('app');
       setTab('partners');
@@ -1365,33 +1458,36 @@ export default function App() {
         setLoginError('Please enter your email and password to log in.');
         return;
       }
-      const accounts = await ACCOUNTS.getAll();
-      const matches = accounts.filter(a => a.email.toLowerCase() === loginForm.email.toLowerCase());
-      if (matches.length === 0) {
-        setLoginError("We couldn't find an account with that email. Sign up to create one.");
+      const { data, error } = await kkSupabaseLogin({
+        email: loginForm.email,
+        password: loginForm.password,
+      });
+      if (error) {
+        setLoginError(mapSupabaseError(error));
         return;
       }
-      const validAccount = matches.find(a => a.password === loginForm.password);
-      if (!validAccount) {
-        setLoginError("That password doesn't match. Try again.");
+      const user = data?.user;
+      if (!user) {
+        setLoginError("We couldn't sign you in. Try again or reset your password.");
         return;
       }
-      // Restore the session for whichever role's account was matched
+      const { data: profileRow } = await kkLoadProfile(user.id);
+      const role = profileRow?.role || user.user_metadata?.role || 'worker';
+
       const sessionSignup = {
-        name: validAccount.name,
-        email: validAccount.email,
-        phone: validAccount.phone,
-        state: validAccount.state,
-        center: validAccount.center || '',
-        password: validAccount.password
+        name: profileRow?.name || user.user_metadata?.name || '',
+        email: user.email || loginForm.email,
+        phone: profileRow?.phone || user.user_metadata?.phone || '',
+        state: profileRow?.state || user.user_metadata?.state || 'Georgia',
+        center: profileRow?.center || profileRow?.business_name || user.user_metadata?.center || '',
+        password: '',
       };
       setSignup(sessionSignup);
       await STORE.set('kk_signup', sessionSignup);
 
-      setUserType(validAccount.role);
-      // Load that user's profile if they're a worker
-      if (validAccount.role === 'worker') {
-        const savedProfile = await STORE.get(`kk_profile_${validAccount.email}`);
+      setUserType(role);
+      if (role === 'worker') {
+        const savedProfile = await STORE.get(`kk_profile_${user.email}`);
         if (savedProfile) {
           setProfile(savedProfile);
           setProfileComplete(true);
@@ -1399,9 +1495,8 @@ export default function App() {
           setProfileComplete(false);
         }
       }
-      // Load posted jobs and applicants for owners
-      if (validAccount.role === 'owner') {
-        const ownerData = await STORE.get(`kk_owner_${validAccount.email}`);
+      if (role === 'owner') {
+        const ownerData = await STORE.get(`kk_owner_${user.email}`);
         if (ownerData) {
           setPosted(ownerData.posted || []);
           setJobApplicants(ownerData.jobApplicants || {});
@@ -1409,11 +1504,18 @@ export default function App() {
         }
       }
       setSignedIn(true);
-      setIsPartner(false);
-      await STORE.set('kk_auth', { signedIn: true, userType: validAccount.role, profileComplete: validAccount.role === 'worker' ? !!(await STORE.get(`kk_profile_${validAccount.email}`)) : false, plan: null, rememberMe: loginForm.rememberMe, currentEmail: validAccount.email });
+      setIsPartner(role === 'partner');
+      await STORE.set('kk_auth', {
+        signedIn: true,
+        userType: role,
+        profileComplete: role === 'worker' ? !!(await STORE.get(`kk_profile_${user.email}`)) : false,
+        plan: null,
+        rememberMe: loginForm.rememberMe,
+        currentEmail: user.email,
+      });
       setLoginForm({ email: '', password: '', rememberMe: false });
       setView('app');
-      setTab('jobs');
+      setTab(role === 'partner' ? 'partners' : 'jobs');
     };
 
     return (
@@ -1480,24 +1582,27 @@ export default function App() {
         setResetError('Enter the email address on your account.');
         return;
       }
-      const matches = (await ACCOUNTS.getAll()).filter(a => a.email.toLowerCase() === resetData.email.toLowerCase());
-      if (matches.length === 0) {
-        setResetError("We couldn't find an account with that email.");
+      const { error } = await kkSupabaseRequestPasswordReset(resetData.email);
+      if (error) {
+        setResetError(mapSupabaseError(error));
         return;
       }
-      // If multiple roles share the email, default to first; in production they'd pick
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      setResetData({...resetData, code: code, role: matches[0].role});
       setEnteredCode('');
       setResetStep('code');
     };
 
-    const verifyResetCode = () => {
+    const verifyResetCode = async () => {
       setResetError('');
-      if (enteredCode !== resetData.code) {
-        setResetError("That code doesn't match. Check your email and try again.");
+      if (enteredCode.length !== 6) {
+        setResetError('Enter the 6 digit code from your email.');
         return;
       }
+      const { error } = await kkSupabaseVerifyRecovery({ email: resetData.email, token: enteredCode });
+      if (error) {
+        setResetError(mapSupabaseError(error));
+        return;
+      }
+      // verifyOtp returned a temporary session — we can now updateUser.
       setResetStep('password');
     };
 
@@ -1515,10 +1620,13 @@ export default function App() {
         setResetError("Passwords don't match.");
         return;
       }
-      // Update ALL accounts with this email (covers shared email across roles)
-      const accounts = await ACCOUNTS.getAll();
-      const updated = accounts.map(a => a.email.toLowerCase() === resetData.email.toLowerCase() ? { ...a, password: resetData.newPassword } : a);
-      await STORE.set('kk_accounts', updated);
+      const { error } = await kkSupabaseUpdatePassword(resetData.newPassword);
+      if (error) {
+        setResetError(mapSupabaseError(error));
+        return;
+      }
+      // We deliberately sign out after a password reset so the user logs in fresh.
+      await supabase.auth.signOut();
       setResetSuccessToast(true);
       setTimeout(() => setResetSuccessToast(false), 4000);
       setResetData({ email: '', code: '', newPassword: '', confirmPassword: '', role: '' });
@@ -1554,11 +1662,7 @@ export default function App() {
             {resetStep === 'code' && (
               <>
                 <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Check your email</h2>
-                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 12 }}>We sent a 6 digit code to <strong>{resetData.email}</strong>.</p>
-                <div style={{ background: c.paleBlue, border: `1.5px dashed ${c.primary}`, borderRadius: 9, padding: 12, marginBottom: 16, fontSize: 12.5, color: c.primaryDark }}>
-                  <strong>Demo mode:</strong> Your code is <strong style={{ fontSize: 16, color: c.primary, letterSpacing: '0.1em' }}>{resetData.code}</strong>
-                  <div style={{ marginTop: 4, fontSize: 11.5 }}>(In production this would be emailed to you.)</div>
-                </div>
+                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 16 }}>We sent a 6 digit code to <strong>{resetData.email}</strong>. It expires in 15 minutes.</p>
                 {resetError && (
                   <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />{resetError}
@@ -1610,12 +1714,7 @@ export default function App() {
               <Mail size={26} color={c.primary} />
             </div>
             <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Verify your email</h2>
-            <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 14 }}>We sent a 6 digit code to <strong>{signup.email}</strong>. Enter it below to confirm your email.</p>
-
-            <div style={{ background: c.paleBlue, border: `1.5px dashed ${c.primary}`, borderRadius: 9, padding: 12, marginBottom: 16, fontSize: 12.5, color: c.primaryDark }}>
-              <strong>Demo mode:</strong> Your code is <strong style={{ fontSize: 16, color: c.primary, letterSpacing: '0.1em' }}>{verificationCode}</strong>
-              <div style={{ marginTop: 4, fontSize: 11.5 }}>(In production this would be emailed to you.)</div>
-            </div>
+            <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 16 }}>We sent a 6 digit code to <strong>{signup.email}</strong>. Enter it below to confirm your email. The code expires in about 15 minutes.</p>
 
             {codeError && (
               <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
