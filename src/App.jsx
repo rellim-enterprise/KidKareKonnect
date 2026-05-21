@@ -149,6 +149,111 @@ async function kkLoadProfile(userId) {
   return { data, error };
 }
 
+// --- Jobs and applications -------------------------------------------------
+
+async function kkLoadActiveJobs() {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('active', true)
+    .order('posted_at', { ascending: false });
+  return { data: data || [], error };
+}
+
+async function kkLoadOwnerJobs(ownerId) {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .order('posted_at', { ascending: false });
+  return { data: data || [], error };
+}
+
+async function kkLoadWorkerApplications(workerId) {
+  const { data, error } = await supabase
+    .from('applications')
+    .select('job_id')
+    .eq('worker_id', workerId);
+  return { data: data || [], error };
+}
+
+async function kkLoadApplicantsForJobs(jobIds) {
+  if (!jobIds || jobIds.length === 0) return { data: {}, error: null };
+  const { data: apps, error: appsErr } = await supabase
+    .from('applications')
+    .select('id, job_id, worker_id, applied_at')
+    .in('job_id', jobIds)
+    .order('applied_at', { ascending: false });
+  if (appsErr) return { data: {}, error: appsErr };
+  const workerIds = Array.from(new Set((apps || []).map(a => a.worker_id)));
+  let byWorker = {};
+  if (workerIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', workerIds);
+    byWorker = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+  }
+  const grouped = {};
+  for (const a of (apps || [])) {
+    if (!grouped[a.job_id]) grouped[a.job_id] = [];
+    const p = byWorker[a.worker_id];
+    if (!p) continue;
+    grouped[a.job_id].push({
+      name: p.name || 'Applicant',
+      email: p.email || '',
+      phone: p.phone || '',
+      photo: p.photo_url || '',
+      city: p.city || '',
+      state: p.state || '',
+      zip: p.zip || '',
+      years: p.years_experience || '',
+      ageGroups: p.age_groups || [],
+      education: p.education || '',
+      credentials: p.credentials || [],
+      bgCheck: p.bg_check || '',
+      availability: p.availability || '',
+      positions: p.positions || [],
+      bio: p.bio || '',
+      resume: p.resume_filename || '',
+      credentialFiles: p.credential_filenames || [],
+      appliedDate: formatRelativeTime(a.applied_at),
+    });
+  }
+  return { data: grouped, error: null };
+}
+
+function formatRelativeTime(ts) {
+  const d = new Date(ts);
+  const diff = Date.now() - d.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return d.toLocaleDateString();
+}
+
+function jobRowToUiJob(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    center: row.center,
+    location: row.location || '',
+    state: row.state || '',
+    type: row.type || 'Full Time',
+    pay: row.pay || '',
+    posted: formatRelativeTime(row.posted_at),
+    tags: row.tags || [],
+    description: row.description || '',
+    verified: !!row.verified,
+    ownerId: row.owner_id,
+    isReal: true,
+  };
+}
+
 // Map app-state profile shape -> profiles table columns
 function profileStateToRow(profile) {
   return {
@@ -243,6 +348,7 @@ export default function App() {
   const [policyAcceptance, setPolicyAcceptance] = useState({ privacy: null, terms: null });
   const [policyForm, setPolicyForm] = useState({ name: '', title: '', business: '' });
   const [policyError, setPolicyError] = useState('');
+  const [realJobs, setRealJobs] = useState([]); // Active jobs posted to Supabase by real owners
 
   // Browser back/forward integration. Each setView pushes a history entry,
   // popstate restores the view, so the browser back button (and the in-app
@@ -338,11 +444,27 @@ export default function App() {
           }
         }
         if (role === 'owner') {
-          const ownerData = await STORE.get(`kk_owner_${email}`);
-          if (ownerData) {
-            setPosted(ownerData.posted || []);
-            setJobApplicants(ownerData.jobApplicants || {});
-            setPlan(ownerData.plan || null);
+          const { data: ownerJobs } = await kkLoadOwnerJobs(session.user.id);
+          const uiJobs = (ownerJobs || []).map(jobRowToUiJob);
+          if (uiJobs.length > 0) {
+            setPosted(uiJobs);
+            const { data: applicantsByJob } = await kkLoadApplicantsForJobs(uiJobs.map(j => j.id));
+            setJobApplicants(applicantsByJob || {});
+          } else {
+            // Fall back to legacy localStorage data if any
+            const ownerData = await STORE.get(`kk_owner_${email}`);
+            if (ownerData) {
+              setPosted(ownerData.posted || []);
+              setJobApplicants(ownerData.jobApplicants || {});
+            }
+          }
+          const legacyPlan = await STORE.get(`kk_owner_${email}`);
+          if (legacyPlan && legacyPlan.plan) setPlan(legacyPlan.plan);
+        }
+        if (role === 'worker') {
+          const { data: apps } = await kkLoadWorkerApplications(session.user.id);
+          if (apps && apps.length > 0) {
+            setApplied(apps.map(a => a.job_id));
           }
         }
         setView('app');
@@ -375,6 +497,9 @@ export default function App() {
       if (banner) setGuestBannerDismissed(true);
       const policy = await STORE.get('kk_policyAcceptance');
       if (policy) setPolicyAcceptance(policy);
+      // Active jobs from Supabase are visible to everyone, including guests.
+      const { data: activeJobs } = await kkLoadActiveJobs();
+      setRealJobs((activeJobs || []).map(jobRowToUiJob));
       setAppLoaded(true);
     })();
   }, []);
@@ -451,9 +576,23 @@ export default function App() {
   };
   const toggleArr = (arr, item) => arr.includes(item) ? arr.filter(x => x !== item) : [...arr, item];
 
-  const tryApply = (job) => {
+  const tryApply = async (job) => {
     if (!signedIn || !profileComplete) { setAuthPromptJob(job); return; }
-    if (!applied.includes(job.id)) {
+    if (applied.includes(job.id)) return;
+    // Real jobs from Supabase have UUID ids; sample jobs have integers.
+    const isReal = job.isReal === true || typeof job.id === 'string';
+    if (isReal) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setAuthPromptJob(job); return; }
+      const { error } = await supabase
+        .from('applications')
+        .insert({ job_id: job.id, worker_id: user.id });
+      if (error) {
+        alert(`Could not submit your application: ${error.message}`);
+        return;
+      }
+    }
+    {
       const nextApplied = [...applied, job.id];
       const snap = { name: signup.name || 'You', email: signup.email, phone: signup.phone, photo: profile.photo, ...profile, appliedDate: 'Just now' };
       const nextApps = { ...jobApplicants, [job.id]: [...(jobApplicants[job.id] || []), snap] };
@@ -600,14 +739,35 @@ export default function App() {
     setTimeout(() => setShowSaveToast(false), 3000);
   };
 
-  const handlePost = () => {
-    const newId = Date.now();
-    const nextPosted = [{ id: newId, ...newJob, center: signup.center || 'Your Center', state: signup.state, posted: 'Just now', tags: ['New Posting'], verified: true, ownerEmail: signup.email }, ...posted];
-    let nextApps = jobApplicants;
-    if (posted.length === 0) nextApps = { ...jobApplicants, [newId]: SAMPLE_APPLICANTS };
-    setPosted(nextPosted);
-    setJobApplicants(nextApps);
-    saveJobs(applied, saved, nextPosted, nextApps);
+  const handlePost = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      alert('Please sign in again to post a job.');
+      return;
+    }
+    const payload = {
+      owner_id: user.id,
+      title: newJob.title,
+      center: signup.center || 'Your Center',
+      location: newJob.location,
+      state: signup.state || 'Georgia',
+      type: newJob.type,
+      pay: newJob.pay,
+      description: newJob.description,
+      tags: ['New Posting'],
+      verified: true,
+      active: true,
+    };
+    const { data: row, error } = await supabase.from('jobs').insert(payload).select().single();
+    if (error || !row) {
+      alert(`Could not post the job: ${error?.message || 'unknown error'}`);
+      return;
+    }
+    const uiJob = jobRowToUiJob(row);
+    setPosted([uiJob, ...posted]);
+    setJobApplicants({ ...jobApplicants });
+    // Also surface this new job in the public browse list immediately
+    setRealJobs([uiJob, ...realJobs]);
     setNewJob({ title: '', location: '', type: 'Full Time', pay: '', description: '' });
     setShowPost(false);
   };
@@ -740,9 +900,10 @@ export default function App() {
   const myUnreadCount = myConversations.reduce((sum, c) => sum + ((c.unreadFor || []).includes(signup.email) ? 1 : 0), 0);
 
   const visibleJobs = useMemo(() => {
-    let jobs = SAMPLE_JOBS;
+    // Real jobs from Supabase appear above demo SAMPLE_JOBS.
+    let jobs = [...realJobs, ...SAMPLE_JOBS];
     if (signedIn && userType === 'worker' && profileComplete && locationFilter === 'myArea' && profile.state) {
-      jobs = SAMPLE_JOBS.filter(j => j.state === profile.state);
+      jobs = jobs.filter(j => j.state === profile.state);
     }
     const q = (jobSearch || '').toLowerCase();
     return jobs.filter(j => {
@@ -750,7 +911,7 @@ export default function App() {
       const f = jobFilter === 'all' || j.type === jobFilter;
       return s && f;
     });
-  }, [signedIn, userType, profileComplete, locationFilter, profile.state, jobSearch, jobFilter]);
+  }, [realJobs, signedIn, userType, profileComplete, locationFilter, profile.state, jobSearch, jobFilter]);
 
   const allPartners = useMemo(() => [...userListings, ...PARTNERS], [userListings]);
   const filteredPartners = useMemo(() => partnerCat === 'All' ? allPartners : allPartners.filter(p => p.category === partnerCat), [partnerCat, allPartners]);
@@ -1575,11 +1736,26 @@ export default function App() {
         }
       }
       if (role === 'owner') {
-        const ownerData = await STORE.get(`kk_owner_${user.email}`);
-        if (ownerData) {
-          setPosted(ownerData.posted || []);
-          setJobApplicants(ownerData.jobApplicants || {});
-          setPlan(ownerData.plan || null);
+        const { data: ownerJobs } = await kkLoadOwnerJobs(user.id);
+        const uiJobs = (ownerJobs || []).map(jobRowToUiJob);
+        if (uiJobs.length > 0) {
+          setPosted(uiJobs);
+          const { data: applicantsByJob } = await kkLoadApplicantsForJobs(uiJobs.map(j => j.id));
+          setJobApplicants(applicantsByJob || {});
+        } else {
+          const ownerData = await STORE.get(`kk_owner_${user.email}`);
+          if (ownerData) {
+            setPosted(ownerData.posted || []);
+            setJobApplicants(ownerData.jobApplicants || {});
+          }
+        }
+        const legacyPlan = await STORE.get(`kk_owner_${user.email}`);
+        if (legacyPlan && legacyPlan.plan) setPlan(legacyPlan.plan);
+      }
+      if (role === 'worker') {
+        const { data: apps } = await kkLoadWorkerApplications(user.id);
+        if (apps && apps.length > 0) {
+          setApplied(apps.map(a => a.job_id));
         }
       }
       setSignedIn(true);
