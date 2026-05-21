@@ -65,6 +65,27 @@
         s.async = 1;
         d.getElementsByTagName("head")[0].appendChild(s);
       })();
+
+      // Brand context that Crisp agents see on every conversation.
+      // (Permanent welcome text & operator card are configured in the
+      // Crisp dashboard: Chatbox Settings → Welcome Message.)
+      window.$crisp.push(["set", "session:data", [[
+        ["business_name", "Rellim Kid Kare Konnect"],
+        ["support_email", "info@kidkarekonnect.com"],
+        ["support_phone", "1-800-499-6349"]
+      ]]]);
+
+      // Fallback welcome shown the first time a visitor opens the chat
+      // in a session, in case the dashboard welcome isn't configured yet.
+      window.$crisp.push(["on", "chat:opened", function () {
+        try {
+          if (window.__rkkk_welcomed) return;
+          window.__rkkk_welcomed = true;
+          window.$crisp.push(["do", "message:show", ["text",
+            "Welcome to Rellim Kid Kare Konnect Support. How may we help you today?"
+          ]]);
+        } catch (e) {}
+      }]);
     </script>
     <!-- END LIVE CHAT WIDGET -->
   </body>
