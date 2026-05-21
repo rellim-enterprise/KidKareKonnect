@@ -164,6 +164,9 @@ export default function App() {
   const [resetError, setResetError] = useState('');
   const [resetSuccessToast, setResetSuccessToast] = useState(false);
   const [guestBannerDismissed, setGuestBannerDismissed] = useState(false);
+  const [policyAcceptance, setPolicyAcceptance] = useState({ privacy: null, terms: null });
+  const [policyForm, setPolicyForm] = useState({ name: '', title: '', business: '' });
+  const [policyError, setPolicyError] = useState('');
 
   // Browser back/forward integration. Each setView pushes a history entry,
   // popstate restores the view, so the browser back button (and the in-app
@@ -259,6 +262,8 @@ export default function App() {
       if (convs) setConversations(convs);
       const banner = await STORE.get('kk_guestBannerDismissed');
       if (banner) setGuestBannerDismissed(true);
+      const policy = await STORE.get('kk_policyAcceptance');
+      if (policy) setPolicyAcceptance(policy);
       setAppLoaded(true);
     })();
   }, []);
@@ -595,7 +600,7 @@ export default function App() {
   const Logo = ({ size = 'md', onDark = false }) => (
     <img
       src="/logo.png"
-      alt="Rellim KidKare Konnect"
+      alt="Rellim Kid Kare Konnect"
       style={{
         height: size === 'lg' ? 110 : 52,
         width: 'auto',
@@ -683,6 +688,310 @@ export default function App() {
           <div style={{ marginTop: 14, fontSize: 13, color: c.textMuted }}>Loading...</div>
         </div>
       </div>
+    );
+  }
+
+  // Shared static-page chrome
+  const StaticPage = ({ kicker, title, lead, children }) => (
+    <div style={{ minHeight: '100vh', background: c.cream, fontFamily: 'system-ui, sans-serif' }}>
+      <Header />
+      <div className="max-w-3xl mx-auto px-4 md:px-6 py-8">
+        <button onClick={goBack} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back</button>
+        <div style={{ marginBottom: 22 }}>
+          {kicker && <div style={{ fontSize: 11.5, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 6 }}>{kicker}</div>}
+          <h1 style={{ fontSize: 'clamp(26px, 4.5vw, 34px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 6 }}>{title}</h1>
+          {lead && <p style={{ fontSize: 15, color: c.textMuted, lineHeight: 1.6 }}>{lead}</p>}
+        </div>
+        <div style={{ background: c.white, borderRadius: 16, padding: '22px 22px 6px', border: `1px solid ${c.border}` }}>
+          {children}
+        </div>
+      </div>
+      <Footer onNavigate={setView} />
+    </div>
+  );
+
+  const PolicySection = ({ heading, children }) => (
+    <section style={{ marginBottom: 22, paddingBottom: 18, borderBottom: `1px solid ${c.borderSoft}` }}>
+      <h2 style={{ fontSize: 16, fontWeight: 800, color: c.navy, marginBottom: 8, letterSpacing: '-0.01em' }}>{heading}</h2>
+      <div style={{ fontSize: 14, color: c.text, lineHeight: 1.65 }}>{children}</div>
+    </section>
+  );
+
+  const acceptPolicy = async (kind) => {
+    setPolicyError('');
+    if (!policyForm.name || !policyForm.title || !policyForm.business) {
+      setPolicyError('Please fill in your name, title, and center or business name before accepting.');
+      return;
+    }
+    const next = { ...policyAcceptance, [kind]: { ...policyForm, date: new Date().toISOString() } };
+    setPolicyAcceptance(next);
+    await STORE.set('kk_policyAcceptance', next);
+    setPolicyForm({ name: '', title: '', business: '' });
+  };
+
+  const SignOffBlock = ({ kind, label }) => {
+    const existing = policyAcceptance[kind];
+    if (existing) {
+      const d = new Date(existing.date);
+      return (
+        <section style={{ marginTop: 6, marginBottom: 12, padding: '16px 18px', background: '#EAF6EE', borderLeft: `4px solid ${c.success}`, borderRadius: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <CheckCircle2 size={16} color={c.success} />
+            <strong style={{ fontSize: 14, color: c.navy }}>{label} accepted</strong>
+          </div>
+          <div style={{ fontSize: 13, color: c.text, lineHeight: 1.55 }}>
+            <div>{existing.name} · {existing.title}</div>
+            <div>{existing.business}</div>
+            <div style={{ color: c.textMuted, marginTop: 4 }}>Accepted {d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+          </div>
+        </section>
+      );
+    }
+    return (
+      <section style={{ marginTop: 12, marginBottom: 12, padding: '18px 18px 16px', background: c.paleBlue, borderRadius: 12, border: `1px solid ${c.lightBlue}` }}>
+        <div style={{ fontSize: 11.5, color: c.primary, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Owner / Director Sign-Off</div>
+        <h3 style={{ fontSize: 16, fontWeight: 800, color: c.navy, marginBottom: 6 }}>Accept the {label}</h3>
+        <p style={{ fontSize: 13, color: c.textMuted, lineHeight: 1.55, marginBottom: 14 }}>By accepting, the owner or director confirms they have reviewed this document and approve its terms on behalf of their center or business.</p>
+        {policyError && (
+          <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '9px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />{policyError}
+          </div>
+        )}
+        <div className="space-y-3">
+          <Input label="Owner / Director Name" value={policyForm.name} onChange={v => setPolicyForm({ ...policyForm, name: v })} placeholder="Toni Brewer" />
+          <Input label="Title" value={policyForm.title} onChange={v => setPolicyForm({ ...policyForm, title: v })} placeholder="Owner / Director" />
+          <Input label="Center or Business Name" value={policyForm.business} onChange={v => setPolicyForm({ ...policyForm, business: v })} placeholder="Little Leaders Academy" />
+        </div>
+        <button onClick={() => acceptPolicy(kind)} style={{ width: '100%', marginTop: 14, padding: '11px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <CheckCircle2 size={14} /> I Accept the {label}
+        </button>
+      </section>
+    );
+  };
+
+  // ABOUT
+  if (view === 'about') {
+    return (
+      <StaticPage kicker="About" title="About Rellim Kid Kare Konnect" lead="A trusted childcare employment and networking platform connecting daycare owners, childcare centers, teachers, childcare professionals, and administrators.">
+        <PolicySection heading="Who we are">
+          Rellim Kid Kare Konnect is a childcare employment and networking platform that connects daycare owners and childcare centers with qualified teachers, childcare professionals, and administrators. The app lets applicants create professional profiles, upload credentials and employment information, and apply for childcare opportunities with ease.
+        </PolicySection>
+        <PolicySection heading="What we do">
+          We support childcare businesses with reliable hiring tools, workforce connections, and strategic partnerships that strengthen and grow the early childhood education community. Centers gain access to a vetted applicant pool, and applicants gain visibility with the centers most likely to value their work.
+        </PolicySection>
+        <PolicySection heading="Our mission">
+          Rellim Kid Kare Konnect empowers the childcare industry by connecting passionate educators and childcare professionals with quality daycare employment opportunities through a secure and trusted platform. Our mission is to support childcare businesses with reliable applicant resources, meaningful partnerships, and innovative tools that strengthen the early childhood education community.
+        </PolicySection>
+        <PolicySection heading="Who Rellim Kid Kare Konnect is for">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Daycare owners and operators</li>
+            <li>Licensed childcare centers</li>
+            <li>Teachers and lead caregivers</li>
+            <li>Childcare professionals and assistants</li>
+            <li>Center directors and administrators</li>
+            <li>Training providers and trusted partners</li>
+          </ul>
+        </PolicySection>
+      </StaticPage>
+    );
+  }
+
+  // CONTACT
+  if (view === 'contact') {
+    return (
+      <StaticPage kicker="Contact" title="Get in touch" lead="We're here to help with account questions, hiring support, billing, and anything else you need.">
+        <PolicySection heading="Reach our team">
+          <div style={{ display: 'grid', gap: 10 }}>
+            <a href="mailto:info@kidkarekonnect.com" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 11, color: c.primaryDark, textDecoration: 'none', fontWeight: 600 }}>
+              <Mail size={18} color={c.primary} />
+              <div>
+                <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Email</div>
+                <div style={{ fontSize: 14 }}>info@kidkarekonnect.com</div>
+              </div>
+            </a>
+            <a href="tel:18004996349" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 11, color: c.primaryDark, textDecoration: 'none', fontWeight: 600 }}>
+              <Phone size={18} color={c.primary} />
+              <div>
+                <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Phone</div>
+                <div style={{ fontSize: 14 }}>1-800-499-6349</div>
+              </div>
+            </a>
+          </div>
+        </PolicySection>
+        <PolicySection heading="How we support you">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li><strong>Email support</strong> — send us a message anytime at info@kidkarekonnect.com</li>
+            <li><strong>Live chat</strong> — use in-app messaging during business hours for real-time help</li>
+            <li><strong>Help desk ticket</strong> — open a ticket from the Help page for tracked issues</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Response times">
+          Our team strives to respond to all support requests in a timely and professional manner. Response times may vary depending on the nature and volume of requests. Urgent account or billing issues are prioritized.
+        </PolicySection>
+        <PolicySection heading="Reporting concerns">
+          To report suspicious activity, false information, harassment, inappropriate conduct, or any policy violation, email us at info@kidkarekonnect.com or open a help desk ticket. We review every report and respond as soon as possible.
+        </PolicySection>
+      </StaticPage>
+    );
+  }
+
+  // PRIVACY
+  if (view === 'privacy') {
+    return (
+      <StaticPage kicker="Privacy" title="Privacy Policy" lead="How Rellim Kid Kare Konnect protects user data and respects your privacy.">
+        <PolicySection heading="Data we collect">
+          We collect only the information needed to operate the platform and support hiring: names, email addresses, phone numbers, employment history, certifications, credentials, profile photos, job postings, and account activity. We do not collect children's information through this platform.
+        </PolicySection>
+        <PolicySection heading="How we use information">
+          Information is used to operate user accounts, match applicants with employers, display profiles to authorized parties, process subscriptions, and improve platform features. We do not sell user information.
+        </PolicySection>
+        <PolicySection heading="Third-party sharing">
+          We do not share user information with third parties, except where required for employment or platform purposes — for example, presenting an applicant's profile to an employer they have applied to, or working with payment and infrastructure providers that help us run the service securely.
+        </PolicySection>
+        <PolicySection heading="How we protect your data">
+          Rellim Kid Kare Konnect protects user data through secure authentication, encrypted data storage, and controlled access measures designed to keep personal and professional information safe. We are committed to maintaining privacy and using secure technology practices to safeguard all user data.
+        </PolicySection>
+        <PolicySection heading="Who can access your information">
+          Access is limited to authorized users: the individual applicant, approved daycare employers they engage with, and authorized administrators responsible for managing the platform. Sensitive information is only shared for employment and hiring purposes and is protected through secure access controls.
+        </PolicySection>
+        <PolicySection heading="Account deletion and data removal">
+          Users may request account deletion or data removal at any time by emailing <strong>info@kidkarekonnect.com</strong> or using the in-app support features. Once verified, accounts and associated personal information will be securely removed in accordance with our privacy and data retention policies.
+          <div style={{ marginTop: 10, padding: '10px 12px', background: c.cream, borderRadius: 8, fontStyle: 'italic', fontSize: 13.5 }}>
+            Los usuarios pueden solicitar la eliminación de su cuenta o la eliminación de datos en cualquier momento comunicándose con soporte a través de info@kidkarekonnect.com.
+          </div>
+        </PolicySection>
+        <SignOffBlock kind="privacy" label="Privacy Policy" />
+      </StaticPage>
+    );
+  }
+
+  // TERMS
+  if (view === 'terms') {
+    return (
+      <StaticPage kicker="Terms" title="Terms & Conditions" lead="By using Rellim Kid Kare Konnect, you agree to the following terms.">
+        <PolicySection heading="User responsibilities">
+          Users are responsible for providing accurate, truthful, and up-to-date information within the platform. Applicants and employers agree to use the app professionally and respectfully, and to maintain the confidentiality of any sensitive information accessed through the platform. Submitting false credentials, misleading information, or engaging in unauthorized use of the app is prohibited.
+        </PolicySection>
+        <PolicySection heading="Acceptable use">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Use the platform in a lawful, respectful, and professional manner</li>
+            <li>Provide truthful and current employment history, certifications, and credentials</li>
+            <li>Keep applicant and employer information confidential — do not share, sell, or distribute it without authorization</li>
+            <li>Do not post false job listings or submit fake applications</li>
+            <li>Do not harass, threaten, or discriminate against other users</li>
+            <li>Do not upload harmful, offensive, or inappropriate content</li>
+            <li>Do not attempt to gain unauthorized access to accounts or platform systems</li>
+            <li>Do not use the platform for illegal or unauthorized activities</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Account security">
+          Users are responsible for maintaining the confidentiality of their login credentials and for all activity associated with their account.
+        </PolicySection>
+        <PolicySection heading="Subscriptions and payments">
+          Centers may subscribe to a paid plan to access full platform features. All subscription fees, advertising fees, partnership fees, and other service-related payments are generally non-refundable unless otherwise stated below. Users may cancel a subscription at any time through account settings or by contacting <strong>info@kidkarekonnect.com</strong>. Cancellation stops future billing cycles; previously paid fees are non-refundable except as noted in the Refund Policy.
+        </PolicySection>
+        <PolicySection heading="Refund policy">
+          Refund requests may be considered for duplicate charges, billing errors, platform-related technical issues that prevent access to paid services, or unauthorized transactions reported and verified by our support team. Refunds will not be issued for failure to secure employment or applicants, dissatisfaction unrelated to platform functionality, account suspension or termination due to policy violations, or unused subscription periods. Requests must be submitted within 7 business days of the transaction date by emailing <strong>info@kidkarekonnect.com</strong> with name, account information, transaction details, and reason. Each request is reviewed case by case.
+        </PolicySection>
+        <PolicySection heading="Account suspension and termination">
+          Rellim Kid Kare Konnect reserves the right to suspend, restrict, or terminate accounts that violate platform policies, submit false information, misuse data, or engage in inappropriate conduct.
+        </PolicySection>
+        <PolicySection heading="Content ownership">
+          Users retain ownership of the content they upload. By using the platform, users grant Rellim Kid Kare Konnect permission to display and process submitted content (resumes, certifications, profile photos, job postings, business advertisements, and messages) for employment, networking, advertising, and platform-related purposes. By uploading content, users confirm it is accurate, lawful, and that they have the right to share it.
+        </PolicySection>
+        <PolicySection heading="Prohibited content">
+          Users may not upload false or misleading information, offensive or discriminatory content, fraudulent credentials, spam or malware, unauthorized advertisements, or any content that violates local, state, or federal laws. Rellim Kid Kare Konnect reserves the right to review, remove, or restrict any content that violates these standards.
+        </PolicySection>
+        <PolicySection heading="Liability disclaimer">
+          Rellim Kid Kare Konnect serves solely as a networking and employment connection platform. We do not guarantee employment, hiring outcomes, applicant qualifications, background check results, or business partnerships. Users are solely responsible for verifying the accuracy, legality, qualifications, certifications, and background information of any party they engage with. We make reasonable efforts to maintain platform availability and security but do not guarantee uninterrupted service. To the fullest extent permitted by law, Rellim Kid Kare Konnect, its owners, affiliates, employees, and partners are not liable for any direct, indirect, incidental, consequential, or special damages resulting from use of or inability to use the platform.
+        </PolicySection>
+        <SignOffBlock kind="terms" label="Terms & Conditions" />
+      </StaticPage>
+    );
+  }
+
+  // HELP
+  if (view === 'help') {
+    return (
+      <StaticPage kicker="Help" title="Help & Support" lead="Quick answers, troubleshooting, and how to reach us if you need a hand.">
+        <PolicySection heading="Frequently asked questions">
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>How do I create an account?</div>
+              <div>Tap Sign Up on the home page, choose Teacher or Daycare Center, and follow the prompts. Email verification takes about a minute.</div>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>I forgot my password — what do I do?</div>
+              <div>From the Log In page, tap "Forgot password?" and we will email you a 6-digit reset code that expires in 15 minutes.</div>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>How do I upload my resume and credentials?</div>
+              <div>Go to My Profile, scroll to the Documents section, and tap Upload. PDF, JPG, and PNG are supported.</div>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>How do I cancel a subscription?</div>
+              <div>Owners can cancel anytime from account settings, or by emailing info@kidkarekonnect.com. Cancellation stops future billing.</div>
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>Can I delete my account?</div>
+              <div>Yes. Email info@kidkarekonnect.com to request account deletion or data removal. Once verified, your account is securely removed.</div>
+            </div>
+          </div>
+        </PolicySection>
+        <PolicySection heading="Login help">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Double-check your email address and password for typos</li>
+            <li>Use the "Forgot password?" link if you can't remember your password</li>
+            <li>Make sure your internet connection is active</li>
+            <li>Close and reopen the app, then try again</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Profile and upload help">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Use supported file formats: PDF, DOC, DOCX for resumes; JPG, PNG, PDF for credentials</li>
+            <li>Keep files under 5 MB for photos and 10 MB for documents</li>
+            <li>If an upload fails, refresh the app and try again</li>
+            <li>Fill in every required profile field marked with an asterisk</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Billing and subscription help">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Confirm your payment method is active and not expired</li>
+            <li>Review subscription status in your account settings</li>
+            <li>Watch for duplicate charges or failed payment notifications</li>
+            <li>Contact info@kidkarekonnect.com for any billing issue</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Notification issues">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Verify app notifications are enabled in your device settings</li>
+            <li>Make sure you have a stable internet connection</li>
+            <li>Sign out and sign back in to refresh your session</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="App performance">
+          <ul style={{ paddingLeft: 20, margin: 0 }}>
+            <li>Close unused apps running in the background</li>
+            <li>Clear the app cache if your device supports it</li>
+            <li>Update to the latest version of the app</li>
+            <li>Reinstall the app if the issue persists</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Contact support">
+          <p style={{ marginBottom: 10 }}>If your issue isn't resolved by the steps above, reach out and our team will help.</p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <a href="mailto:info@kidkarekonnect.com?subject=Rellim%20Kid%20Kare%20Konnect%20support%20request" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 10, color: c.primaryDark, textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>
+              <Mail size={15} color={c.primary} /> info@kidkarekonnect.com
+            </a>
+            <a href="tel:18004996349" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 10, color: c.primaryDark, textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>
+              <Phone size={15} color={c.primary} /> 1-800-499-6349
+            </a>
+          </div>
+          <p style={{ marginTop: 10, fontSize: 13, color: c.textMuted }}>
+            When you reach out, please include your name, the device you're using, a description of the issue, screenshots if you have them, and any troubleshooting you've already tried.
+          </p>
+        </PolicySection>
+      </StaticPage>
     );
   }
 
@@ -826,7 +1135,7 @@ export default function App() {
           </div>
         </section>
 
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -869,7 +1178,7 @@ export default function App() {
             Already have an account?{' '}<button onClick={() => setView('login')} style={{ color: c.primary, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Log in here</button>
           </p>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -952,7 +1261,7 @@ export default function App() {
             </p>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1023,7 +1332,7 @@ export default function App() {
             </p>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1138,7 +1447,7 @@ export default function App() {
             </p>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1264,7 +1573,7 @@ export default function App() {
             </p>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1310,7 +1619,7 @@ export default function App() {
             </p>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1350,7 +1659,7 @@ export default function App() {
             </div>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1471,7 +1780,7 @@ export default function App() {
             {pendingApply && <div style={{ marginTop: 10, padding: 11, background: c.paleBlue, borderRadius: 8, fontSize: 12.5, color: c.primaryDark, display: 'flex', alignItems: 'center', gap: 7 }}><AlertCircle size={14} /> We'll auto submit your application once saved.</div>}
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -1490,7 +1799,7 @@ export default function App() {
             <p style={{ color: c.textMuted, fontSize: 14, lineHeight: 1.55, marginBottom: 18 }}>Subscription plans are for daycare centers that post jobs. As a teacher or caregiver, you get full access to KidKare at no cost — forever.</p>
             <button onClick={() => setView('app')} style={{ padding: '11px 22px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>Back to my jobs</button>
           </div>
-          <Footer />
+          <Footer onNavigate={setView} />
         </div>
       );
     }
@@ -1549,7 +1858,7 @@ export default function App() {
             </p>
           </div>
         </div>
-        <Footer />
+        <Footer onNavigate={setView} />
       </div>
     );
   }
@@ -2307,7 +2616,7 @@ export default function App() {
           </div>
         </Modal>
       )}
-      <Footer />
+      <Footer onNavigate={setView} />
     </div>
   );
 }
@@ -2375,23 +2684,30 @@ function DetailBox({ label, children }) {
   );
 }
 
-function Footer() {
-  // TODO: Build real About, Contact, Privacy, Terms, Help pages
-  const handleLink = (name) => alert(`${name}: Coming soon!`);
-  const links = ['About', 'Contact', 'Privacy', 'Terms', 'Help'];
+function Footer({ onNavigate }) {
+  const links = [
+    { label: 'About', view: 'about' },
+    { label: 'Contact', view: 'contact' },
+    { label: 'Privacy', view: 'privacy' },
+    { label: 'Terms', view: 'terms' },
+    { label: 'Help', view: 'help' }
+  ];
+  const handleLink = (item) => {
+    if (typeof onNavigate === 'function') onNavigate(item.view);
+  };
   return (
     <footer style={{ background: c.navy, color: 'rgba(255,255,255,0.7)', padding: '32px 0', marginTop: 40 }}>
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         <div className="flex flex-col gap-3">
           <div style={{ background: c.white, padding: '10px 16px', borderRadius: 12, display: 'inline-flex', alignSelf: 'flex-start', boxShadow: '0 4px 14px rgba(0,0,0,0.18)' }}>
-            <img src="/logo.png" alt="Rellim KidKare Konnect" style={{ height: 56, width: 'auto', display: 'block' }} />
+            <img src="/logo.png" alt="Rellim Kid Kare Konnect" style={{ height: 56, width: 'auto', display: 'block' }} />
           </div>
           <div className="flex flex-wrap" style={{ gap: '4px 16px' }}>
             {links.map(l => (
-              <button key={l} type="button" onClick={() => handleLink(l)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.78)', padding: 0, fontSize: 13, fontWeight: 500 }}>{l}</button>
+              <button key={l.view} type="button" onClick={() => handleLink(l)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.78)', padding: 0, fontSize: 13, fontWeight: 500 }}>{l.label}</button>
             ))}
           </div>
-          <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.55)' }}>© 2026 Rellim KidKare Konnect · A Rellim company</div>
+          <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.55)' }}>© 2026 Rellim Kid Kare Konnect · A Rellim company</div>
         </div>
         <div style={{ fontSize: 14, color: c.gold, fontWeight: 600, fontStyle: 'italic' }}>Where Great Childcare Begins</div>
       </div>
