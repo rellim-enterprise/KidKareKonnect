@@ -5,7 +5,7 @@ import {
   Clock, DollarSign, X, Plus, FileText, ExternalLink,
   LogOut, Bookmark, LayoutGrid, CheckCircle2, Lock, Verified,
   AlertCircle, Edit3, Upload, Paperclip, Handshake, Megaphone,
-  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound
+  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle
 } from 'lucide-react';
 
 const c = {
@@ -707,6 +707,7 @@ export default function App() {
         </div>
       </div>
       <Footer onNavigate={setView} />
+      <LiveChat />
     </div>
   );
 
@@ -2681,6 +2682,152 @@ function DetailBox({ label, children }) {
       <div style={{ fontSize: 10.5, fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
       <div style={{ padding: 12, background: c.cream, borderRadius: 9 }}>{children}</div>
     </div>
+  );
+}
+
+function LiveChat() {
+  const [open, setOpen] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', message: '' });
+  const [err, setErr] = useState('');
+  const [providerLoaded, setProviderLoaded] = useState(false);
+
+  // If a third-party live chat provider script (Tawk.to, Tidio, Crisp,
+  // HubSpot, etc.) is loaded via index.html, step aside and let it run
+  // its own bubble so the user doesn't see two chat widgets.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const check = () => {
+      const provider =
+        window.Tawk_API ||
+        window.tidioChatApi ||
+        window.$crisp ||
+        window.HubSpotConversations ||
+        window.LC_API ||
+        window.Intercom ||
+        window.zE;
+      if (provider) setProviderLoaded(true);
+    };
+    check();
+    const id = window.setInterval(check, 1500);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (providerLoaded) return null;
+
+  const handleSend = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setErr('');
+    if (!form.name || !form.email || !form.message) {
+      setErr('Please enter your name, email, and a short message so we can help.');
+      return;
+    }
+    const subject = encodeURIComponent('Rellim Kid Kare Konnect — Live Chat Message');
+    const body = encodeURIComponent(
+      `From: ${form.name} <${form.email}>\n\n${form.message}\n\n— Sent from in-app live chat`
+    );
+    if (typeof window !== 'undefined') {
+      window.location.href = `mailto:info@kidkarekonnect.com?subject=${subject}&body=${body}`;
+    }
+    setSent(true);
+  };
+
+  const reset = () => {
+    setForm({ name: '', email: '', message: '' });
+    setSent(false);
+    setErr('');
+  };
+
+  return (
+    <>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open live chat"
+          style={{
+            position: 'fixed', right: 18, bottom: 18, zIndex: 90,
+            width: 56, height: 56, borderRadius: '50%',
+            background: c.primary, color: c.white, border: 'none',
+            cursor: 'pointer', boxShadow: '0 8px 22px rgba(15,42,61,0.28)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+        >
+          <MessageCircle size={24} />
+          <span aria-hidden="true" style={{ position: 'absolute', top: 6, right: 6, width: 10, height: 10, borderRadius: '50%', background: '#FF8C42', border: `2px solid ${c.primary}` }} />
+        </button>
+      )}
+
+      {open && (
+        <div
+          role="dialog"
+          aria-label="Rellim Kid Kare Konnect support chat"
+          style={{
+            position: 'fixed', right: 18, bottom: 18, zIndex: 95,
+            width: 'min(360px, calc(100vw - 24px))',
+            maxHeight: 'min(560px, calc(100vh - 36px))',
+            background: c.white, borderRadius: 16,
+            boxShadow: '0 24px 60px rgba(15,42,61,0.25)',
+            border: `1px solid ${c.border}`, overflow: 'hidden',
+            display: 'flex', flexDirection: 'column'
+          }}
+        >
+          <div style={{ background: `linear-gradient(135deg, ${c.primary} 0%, ${c.primaryDark} 100%)`, color: c.white, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 800, letterSpacing: '-0.01em' }}>Rellim Kid Kare Konnect</div>
+              <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#FF8C42', display: 'inline-block' }} />
+                Offline · Leave us a message
+              </div>
+            </div>
+            <button onClick={() => setOpen(false)} aria-label="Close live chat" style={{ background: 'rgba(255,255,255,0.15)', border: 'none', cursor: 'pointer', color: c.white, padding: 6, borderRadius: 8, display: 'flex' }}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ padding: 14, overflowY: 'auto', flex: 1, background: c.cream }}>
+            <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: '10px 12px', fontSize: 13.5, lineHeight: 1.55, color: c.text, marginBottom: 10, maxWidth: '92%' }}>
+              <div style={{ fontSize: 11, color: c.primary, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 3 }}>Support</div>
+              Welcome to Rellim Kid Kare Konnect Support. How may we help you today?
+            </div>
+
+            {sent ? (
+              <div style={{ background: '#EAF6EE', border: `1px solid ${c.success}`, borderRadius: 12, padding: '12px 14px', fontSize: 13.5, color: c.navy, lineHeight: 1.55 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, marginBottom: 4 }}>
+                  <CheckCircle2 size={15} color={c.success} /> Message ready to send
+                </div>
+                Your email client should have opened with your message pre-filled. Our team replies within one business day.
+                <button onClick={reset} style={{ marginTop: 10, padding: '7px 12px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Send another message</button>
+              </div>
+            ) : (
+              <form onSubmit={handleSend} style={{ display: 'grid', gap: 9 }}>
+                {err && (
+                  <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '8px 11px', borderRadius: 8, fontSize: 12.5, display: 'flex', alignItems: 'flex-start', gap: 7 }}>
+                    <AlertCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />{err}
+                  </div>
+                )}
+                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Your name" style={{ padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, outline: 'none', background: c.white, color: c.text }} />
+                <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Email address" style={{ padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, outline: 'none', background: c.white, color: c.text }} />
+                <textarea value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="How can we help?" rows={3} style={{ padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, outline: 'none', background: c.white, color: c.text, resize: 'vertical', fontFamily: 'inherit' }} />
+                <button type="submit" style={{ padding: '10px 12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  <Send size={13} /> Send message
+                </button>
+              </form>
+            )}
+
+            <div style={{ marginTop: 12, padding: '10px 12px', background: c.white, border: `1px solid ${c.borderSoft}`, borderRadius: 10, fontSize: 12.5, color: c.text, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>Reach us directly</div>
+              <a href="mailto:info@kidkarekonnect.com" style={{ display: 'flex', alignItems: 'center', gap: 7, color: c.primary, textDecoration: 'none', fontWeight: 600, marginBottom: 4 }}><Mail size={12} /> info@kidkarekonnect.com</a>
+              <a href="tel:18004996349" style={{ display: 'flex', alignItems: 'center', gap: 7, color: c.primary, textDecoration: 'none', fontWeight: 600 }}><Phone size={12} /> 1-800-499-6349</a>
+            </div>
+
+            <p style={{ marginTop: 10, fontSize: 11, color: c.textMuted, lineHeight: 1.5, fontStyle: 'italic' }}>
+              By using live chat, you agree that your message may be reviewed by Rellim Kid Kare Konnect support staff to assist with your request.
+            </p>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
