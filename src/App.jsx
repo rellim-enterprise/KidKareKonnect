@@ -294,6 +294,22 @@ export default function App() {
     if (appLoaded) STORE.set('kk_conversations', conversations);
   }, [conversations, appLoaded]);
 
+  // Pass signed-in user info to the Crisp live chat widget so support
+  // agents see who they're talking to. No-op until Crisp's script loads.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!signedIn || !signup.email) return;
+    const push = (args) => { (window.$crisp = window.$crisp || []).push(args); };
+    push(['set', 'user:email', [signup.email]]);
+    if (signup.name) push(['set', 'user:nickname', [signup.name]]);
+    if (signup.phone) push(['set', 'user:phone', [signup.phone]]);
+    const segments = [];
+    if (userType) segments.push(['role', userType]);
+    if (plan) segments.push(['plan', plan]);
+    if (signup.center) segments.push(['center', signup.center]);
+    if (segments.length) push(['set', 'session:data', [segments]]);
+  }, [signedIn, signup.email, signup.name, signup.phone, signup.center, userType, plan]);
+
   const saveAuth = () => STORE.set('kk_auth', { signedIn, userType, profileComplete, plan });
   const saveJobs = (a, s, p, j) => STORE.set('kk_jobs', { applied: a, saved: s, posted: p, jobApplicants: j });
 
@@ -509,6 +525,9 @@ export default function App() {
     setJobApplicants({});
     setIsPartner(false);
     setGuestBannerDismissed(false);
+    if (typeof window !== 'undefined' && window.$crisp) {
+      window.$crisp.push(['do', 'session:reset']);
+    }
     setProfile({ photo: '', city: '', state: 'Georgia', zip: '', years: '', ageGroups: [], education: '', credentials: [], bgCheck: '', availability: '', positions: [], bio: '', resume: '', credentialFiles: [] });
     setSignup({ name: '', email: '', phone: '', state: 'Georgia', center: '', password: '' });
   };
