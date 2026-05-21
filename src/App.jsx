@@ -149,6 +149,47 @@ async function kkLoadProfile(userId) {
   return { data, error };
 }
 
+// Map app-state profile shape -> profiles table columns
+function profileStateToRow(profile) {
+  return {
+    city: profile.city || null,
+    state: profile.state || null,
+    zip: profile.zip || null,
+    years_experience: profile.years || null,
+    age_groups: profile.ageGroups || [],
+    education: profile.education || null,
+    credentials: profile.credentials || [],
+    bg_check: profile.bgCheck || null,
+    availability: profile.availability || null,
+    positions: profile.positions || [],
+    bio: profile.bio || null,
+    resume_filename: profile.resume || null,
+    credential_filenames: profile.credentialFiles || [],
+    photo_url: profile.photo || null,
+  };
+}
+
+// Map profiles table row -> app-state profile shape
+function rowToProfileState(row, fallbackState) {
+  if (!row) return null;
+  return {
+    photo: row.photo_url || '',
+    city: row.city || '',
+    state: row.state || fallbackState || 'Georgia',
+    zip: row.zip || '',
+    years: row.years_experience || '',
+    ageGroups: row.age_groups || [],
+    education: row.education || '',
+    credentials: row.credentials || [],
+    bgCheck: row.bg_check || '',
+    availability: row.availability || '',
+    positions: row.positions || [],
+    bio: row.bio || '',
+    resume: row.resume_filename || '',
+    credentialFiles: row.credential_filenames || [],
+  };
+}
+
 function mapSupabaseError(err, fallback) {
   if (!err) return fallback || 'Something went wrong. Please try again.';
   const msg = (err.message || '').toLowerCase();
@@ -283,10 +324,17 @@ export default function App() {
           password: '',
         });
         if (role === 'worker') {
-          const savedProfile = await STORE.get(`kk_profile_${email}`);
-          if (savedProfile) {
-            setProfile(savedProfile);
-            setProfileComplete(true);
+          const remote = rowToProfileState(profileRow, profileRow?.state);
+          if (remote) {
+            setProfile(remote);
+            setProfileComplete(!!profileRow?.profile_complete);
+          } else {
+            // Fall back to localStorage cache from earlier sessions
+            const savedProfile = await STORE.get(`kk_profile_${email}`);
+            if (savedProfile) {
+              setProfile(savedProfile);
+              setProfileComplete(true);
+            }
           }
         }
         if (role === 'owner') {
@@ -340,6 +388,20 @@ export default function App() {
       }
     }
   }, [profile, appLoaded, signedIn, signup.email, userType]);
+
+  // Debounced sync of worker profile fields to Supabase so the data
+  // follows the user across devices. Only fires for workers with a live
+  // session — owners and partners don't have these fields populated.
+  useEffect(() => {
+    if (!appLoaded || !signedIn || userType !== 'worker') return;
+    const handle = setTimeout(async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const row = profileStateToRow(profile);
+      await supabase.from('profiles').update(row).eq('id', user.id);
+    }, 800);
+    return () => clearTimeout(handle);
+  }, [profile, appLoaded, signedIn, userType]);
 
   useEffect(() => {
     if (appLoaded) STORE.set('kk_signup', signup);
@@ -512,6 +574,17 @@ export default function App() {
     setProfileComplete(true);
     setStateSel(profile.state);
     await STORE.set('kk_auth', { signedIn: true, userType, profileComplete: true, plan });
+    // Mark the profile as complete in Supabase so we can route directly to
+    // the app next time this user signs in (from any device).
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('profiles')
+          .update({ ...profileStateToRow(profile), profile_complete: true })
+          .eq('id', user.id);
+      }
+    } catch (_) { /* non-fatal */ }
     if (pendingApply) {
       const nextApplied = [...applied, pendingApply];
       const snap = { name: signup.name || 'You', email: signup.email, phone: signup.phone, photo: profile.photo, ...profile, appliedDate: 'Just now' };
@@ -1487,12 +1560,18 @@ export default function App() {
 
       setUserType(role);
       if (role === 'worker') {
-        const savedProfile = await STORE.get(`kk_profile_${user.email}`);
-        if (savedProfile) {
-          setProfile(savedProfile);
-          setProfileComplete(true);
+        const remote = rowToProfileState(profileRow, profileRow?.state);
+        if (remote && (profileRow?.profile_complete || profileRow?.city)) {
+          setProfile(remote);
+          setProfileComplete(!!profileRow?.profile_complete);
         } else {
-          setProfileComplete(false);
+          const savedProfile = await STORE.get(`kk_profile_${user.email}`);
+          if (savedProfile) {
+            setProfile(savedProfile);
+            setProfileComplete(true);
+          } else {
+            setProfileComplete(false);
+          }
         }
       }
       if (role === 'owner') {
