@@ -535,8 +535,8 @@ export default function App() {
 
   const handleVerifyEmail = async () => {
     setCodeError('');
-    if (enteredCode.length !== 6) {
-      setCodeError('Enter the 6 digit code from your email.');
+    if (enteredCode.length < 6) {
+      setCodeError('Enter the verification code from your email.');
       return;
     }
     const { error } = await kkSupabaseVerifyEmail({ email: signup.email, token: enteredCode });
@@ -1093,7 +1093,7 @@ export default function App() {
             </div>
             <div>
               <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>I forgot my password — what do I do?</div>
-              <div>From the Log In page, tap "Forgot password?" and we will email you a 6-digit reset code that expires in 15 minutes.</div>
+              <div>From the Log In page, tap "Forgot password?" and we will email you a reset code that expires in 15 minutes.</div>
             </div>
             <div>
               <div style={{ fontWeight: 700, color: c.navy, marginBottom: 3 }}>How do I upload my resume and credentials?</div>
@@ -1672,8 +1672,8 @@ export default function App() {
 
     const verifyResetCode = async () => {
       setResetError('');
-      if (enteredCode.length !== 6) {
-        setResetError('Enter the 6 digit code from your email.');
+      if (enteredCode.length < 6) {
+        setResetError('Enter the verification code from your email.');
         return;
       }
       const { error } = await kkSupabaseVerifyRecovery({ email: resetData.email, token: enteredCode });
@@ -1726,7 +1726,7 @@ export default function App() {
             {resetStep === 'email' && (
               <>
                 <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5, textAlign: 'center' }}>Reset your password</h2>
-                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 6, textAlign: 'center' }}>We'll send a 6-digit code that expires in 15 minutes.</p>
+                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 6, textAlign: 'center' }}>We'll email you a verification code that expires in 15 minutes.</p>
                 <p style={{ color: c.textMuted, fontSize: 13, marginBottom: 18, textAlign: 'center' }}>Enter the email on your account.</p>
                 {resetError && (
                   <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -1741,17 +1741,17 @@ export default function App() {
             {resetStep === 'code' && (
               <>
                 <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Check your email</h2>
-                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 16 }}>We sent a 6 digit code to <strong>{resetData.email}</strong>. It expires in 15 minutes.</p>
+                <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 16 }}>We sent a verification code to <strong>{resetData.email}</strong>. It expires in 15 minutes.</p>
                 {resetError && (
                   <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                     <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />{resetError}
                   </div>
                 )}
                 <div>
-                  <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>6 digit code</label>
-                  <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.3em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} />
+                  <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Verification code</label>
+                  <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Enter code from email" maxLength={10} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.2em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} />
                 </div>
-                <button onClick={() => { if (enteredCode.length !== 6) { setResetError('Enter the 6 digit code from your email.'); return; } verifyResetCode(); }} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify Code</button>
+                <button onClick={() => { if (enteredCode.length < 6) { setResetError('Enter the verification code from your email.'); return; } verifyResetCode(); }} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify Code</button>
               </>
             )}
 
@@ -1793,7 +1793,7 @@ export default function App() {
               <Mail size={26} color={c.primary} />
             </div>
             <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 5 }}>Verify your email</h2>
-            <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 16 }}>We sent a 6 digit code to <strong>{signup.email}</strong>. Enter it below to confirm your email. The code expires in about 15 minutes.</p>
+            <p style={{ color: c.textMuted, fontSize: 13.5, marginBottom: 16 }}>We sent a verification code to <strong>{signup.email}</strong>. Enter it below to confirm your email. The code expires in about 15 minutes.</p>
 
             {codeError && (
               <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 12px', borderRadius: 8, fontSize: 13, marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -1802,8 +1802,8 @@ export default function App() {
             )}
 
             <div>
-              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>6 digit verification code</label>
-              <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.3em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} onKeyDown={e => e.key === 'Enter' && enteredCode.length === 6 && handleVerifyEmail()} />
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Verification code</label>
+              <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Enter code from email" maxLength={10} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.2em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} onKeyDown={e => e.key === 'Enter' && enteredCode.length >= 6 && handleVerifyEmail()} />
             </div>
 
             <button onClick={handleVerifyEmail} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify and Continue</button>
