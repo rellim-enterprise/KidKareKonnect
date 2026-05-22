@@ -200,6 +200,7 @@ async function kkLoadApplicantsForJobs(jobIds) {
     const p = byWorker[a.worker_id];
     if (!p) continue;
     grouped[a.job_id].push({
+      userId: a.worker_id,
       name: p.name || 'Applicant',
       email: p.email || '',
       phone: p.phone || '',
@@ -299,6 +300,118 @@ function rowToProfileState(row, fallbackState) {
     credentialFiles: row.credential_filenames || [],
     credentialUrls: row.credential_urls || [],
   };
+}
+
+// =============================================================
+// Messaging — conversations + messages live in Supabase. The UI
+// state shape is preserved (participants array, messages array,
+// unreadFor email list) so the existing message UI keeps working.
+// =============================================================
+async function kkLoadConversationsForUser(userId) {
+  if (!userId) return { data: [], error: null };
+  const { data: convs, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .or(`worker_id.eq.${userId},owner_id.eq.${userId}`)
+    .order('last_message_at', { ascending: false });
+  if (error) return { data: [], error };
+  if (!convs || convs.length === 0) return { data: [], error: null };
+
+  const convIds = convs.map(c => c.id);
+  const [{ data: msgs }, { data: profiles }] = await Promise.all([
+    supabase
+      .from('messages')
+      .select('*')
+      .in('conversation_id', convIds)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('profiles')
+      .select('id, email, name, photo_url, center, business_name')
+      .in('id', Array.from(new Set(convs.flatMap(c => [c.worker_id, c.owner_id])))),
+  ]);
+
+  const profMap = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+  const msgsByConv = {};
+  for (const m of msgs || []) {
+    if (!msgsByConv[m.conversation_id]) msgsByConv[m.conversation_id] = [];
+    msgsByConv[m.conversation_id].push(m);
+  }
+
+  const uiConvs = convs.map(c => {
+    const w = profMap[c.worker_id] || { email: '', name: 'Worker', photo_url: '' };
+    const o = profMap[c.owner_id] || { email: '', name: 'Owner', photo_url: '' };
+    return {
+      id: c.id,
+      key: c.id, // use the real DB id as the key
+      jobTitle: c.job_title || '',
+      jobId: c.job_id || null,
+      workerId: c.worker_id,
+      ownerId: c.owner_id,
+      participants: [
+        { email: w.email || '', name: w.name || 'Worker', role: 'worker', photo: w.photo_url || '', center: '' },
+        { email: o.email || '', name: o.name || 'Owner', role: 'owner', photo: o.photo_url || '', center: o.center || o.business_name || '' },
+      ],
+      messages: (msgsByConv[c.id] || []).map(m => ({
+        from: m.sender_id === c.worker_id ? (w.email || 'worker') : (o.email || 'owner'),
+        text: m.body,
+        time: m.created_at,
+        system: !!m.is_system,
+      })),
+      lastUpdated: c.last_message_at,
+      unreadFor: [
+        c.unread_for_worker && w.email ? w.email : null,
+        c.unread_for_owner && o.email ? o.email : null,
+      ].filter(Boolean),
+    };
+  });
+  return { data: uiConvs, error: null };
+}
+
+async function kkGetOrCreateConversation({ workerId, ownerId, jobId, jobTitle }) {
+  let query = supabase
+    .from('conversations')
+    .select('*')
+    .eq('worker_id', workerId)
+    .eq('owner_id', ownerId);
+  if (jobTitle) query = query.eq('job_title', jobTitle);
+  const { data: found } = await query.maybeSingle();
+  if (found) return { data: found, error: null };
+  return supabase
+    .from('conversations')
+    .insert({
+      worker_id: workerId,
+      owner_id: ownerId,
+      job_id: jobId || null,
+      job_title: jobTitle || null,
+    })
+    .select()
+    .single();
+}
+
+async function kkSendMessage({ conversationId, body, isSystem = false }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: new Error('You must be signed in.') };
+  return supabase.from('messages').insert({
+    conversation_id: conversationId,
+    sender_id: user.id,
+    body,
+    is_system: isSystem,
+  });
+}
+
+async function kkMarkConversationRead({ conversationId, userId }) {
+  // Figure out which side I am, then clear my unread flag.
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('worker_id, owner_id')
+    .eq('id', conversationId)
+    .maybeSingle();
+  if (!conv) return { error: null };
+  const update = {};
+  if (conv.worker_id === userId) update.unread_for_worker = false;
+  if (conv.owner_id === userId) update.unread_for_owner = false;
+  if (Object.keys(update).length === 0) return { error: null };
+  return supabase.from('conversations').update(update).eq('id', conversationId);
 }
 
 function mapSupabaseError(err, fallback) {
@@ -473,6 +586,11 @@ export default function App() {
             setApplied(apps.map(a => a.job_id));
           }
         }
+        // Load conversations for the signed-in user (works for any role).
+        {
+          const { data: convs } = await kkLoadConversationsForUser(session.user.id);
+          if (convs) setConversations(convs);
+        }
         setView('app');
       } else {
         // No live session — fall back to the legacy localStorage hints just
@@ -497,8 +615,6 @@ export default function App() {
       }
       const list = await STORE.get('kk_listings');
       if (list) setUserListings(list);
-      const convs = await STORE.get('kk_conversations');
-      if (convs) setConversations(convs);
       const banner = await STORE.get('kk_guestBannerDismissed');
       if (banner) setGuestBannerDismissed(true);
       const policy = await STORE.get('kk_policyAcceptance');
@@ -544,11 +660,6 @@ export default function App() {
       STORE.set(`kk_owner_${signup.email}`, { posted, jobApplicants, plan });
     }
   }, [posted, jobApplicants, plan, appLoaded, signedIn, signup.email, userType]);
-
-  // Save conversations
-  useEffect(() => {
-    if (appLoaded) STORE.set('kk_conversations', conversations);
-  }, [conversations, appLoaded]);
 
   // Pass signed-in user info to the Crisp live chat widget so support
   // agents see who they're talking to. No-op until Crisp's script loads.
@@ -598,33 +709,31 @@ export default function App() {
         return;
       }
     }
-    {
-      const nextApplied = [...applied, job.id];
-      const snap = { name: signup.name || 'You', email: signup.email, phone: signup.phone, photo: profile.photo, ...profile, appliedDate: 'Just now' };
-      const nextApps = { ...jobApplicants, [job.id]: [...(jobApplicants[job.id] || []), snap] };
-      setApplied(nextApplied);
-      setJobApplicants(nextApps);
-      saveJobs(nextApplied, saved, posted, nextApps);
-      // Auto-start a conversation so the applicant and owner can chat
-      // Owner email comes from posted jobs (real owner) or we use a placeholder for sample jobs
-      const ownerEmail = job.ownerEmail || `${(job.center || 'center').toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`;
-      const convKey = [signup.email, ownerEmail].sort().join('|') + '#' + job.title;
-      if (!conversations.find(co => co.key === convKey)) {
-        const newConv = {
-          id: Date.now(),
-          key: convKey,
-          participants: [
-            { email: signup.email, name: signup.name, role: 'worker', photo: profile.photo, center: '' },
-            { email: ownerEmail, name: job.center, role: 'owner', photo: '', center: job.center }
-          ],
+    const nextApplied = [...applied, job.id];
+    const snap = { name: signup.name || 'You', email: signup.email, phone: signup.phone, photo: profile.photo, ...profile, appliedDate: 'Just now' };
+    const nextApps = { ...jobApplicants, [job.id]: [...(jobApplicants[job.id] || []), snap] };
+    setApplied(nextApplied);
+    setJobApplicants(nextApps);
+    saveJobs(nextApplied, saved, posted, nextApps);
+
+    // Auto-create a Supabase conversation with the real owner (if this
+    // is a real job). Sample jobs have no real owner so we skip that case.
+    if (isReal && job.ownerId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: conv } = await kkGetOrCreateConversation({
+          workerId: user.id,
+          ownerId: job.ownerId,
+          jobId: typeof job.id === 'string' ? job.id : null,
           jobTitle: job.title,
-          messages: [
-            { from: signup.email, text: `Hi! I just applied to your ${job.title} position. Looking forward to hearing from you.`, time: new Date().toISOString(), system: false }
-          ],
-          lastUpdated: new Date().toISOString(),
-          unreadFor: [ownerEmail]
-        };
-        setConversations([...conversations, newConv]);
+        });
+        if (conv) {
+          await kkSendMessage({
+            conversationId: conv.id,
+            body: `Hi! I just applied to your ${job.title} position. Looking forward to hearing from you.`,
+          });
+          await reloadConversations();
+        }
       }
     }
   };
@@ -921,52 +1030,70 @@ export default function App() {
     setSignup({ name: '', email: '', phone: '', state: 'Georgia', center: '', password: '' });
   };
 
-  // MESSAGING HELPERS
-  const startOrOpenConversation = (otherParty) => {
-    // otherParty = { email, name, role, photo?, center?, jobTitle? }
-    const myEmail = signup.email;
-    const myRole = userType;
-    const convKey = [myEmail, otherParty.email].sort().join('|') + (otherParty.jobTitle ? '#' + otherParty.jobTitle : '');
-    const existing = conversations.find(c => c.key === convKey);
-    if (existing) {
-      setActiveConvId(existing.id);
-      setTab('messages');
+  // MESSAGING — backed by Supabase. The UI keeps the same shape; we
+  // reload after every write so unread flags + last-message ordering
+  // come straight from the DB triggers.
+  const reloadConversations = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await kkLoadConversationsForUser(user.id);
+    setConversations(data || []);
+  };
+
+  const startOrOpenConversation = async (otherParty) => {
+    // otherParty = { email, name, role, userId, jobTitle?, jobId?, photo?, center? }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    // Need the other party's user ID. Pass it on otherParty.userId for new
+    // applicant cases; fall back to a lookup by email if not provided.
+    let otherUserId = otherParty.userId;
+    if (!otherUserId && otherParty.email) {
+      const { data: row } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', otherParty.email)
+        .maybeSingle();
+      otherUserId = row?.id;
+    }
+    if (!otherUserId) {
+      alert('Could not find that user to start a conversation with.');
       return;
     }
-    const newConv = {
-      id: Date.now(),
-      key: convKey,
-      participants: [
-        { email: myEmail, name: signup.name, role: myRole, photo: profile.photo, center: signup.center || '' },
-        { email: otherParty.email, name: otherParty.name, role: otherParty.role, photo: otherParty.photo || '', center: otherParty.center || '' }
-      ],
-      jobTitle: otherParty.jobTitle || '',
-      messages: [],
-      lastUpdated: new Date().toISOString(),
-      unreadFor: []
-    };
-    setConversations([...conversations, newConv]);
-    setActiveConvId(newConv.id);
+    const isMeWorker = userType === 'worker';
+    const workerId = isMeWorker ? user.id : otherUserId;
+    const ownerId = isMeWorker ? otherUserId : user.id;
+    const { data: conv, error } = await kkGetOrCreateConversation({
+      workerId,
+      ownerId,
+      jobId: otherParty.jobId || null,
+      jobTitle: otherParty.jobTitle || null,
+    });
+    if (error || !conv) {
+      alert(`Could not start the conversation: ${error?.message || 'unknown error'}`);
+      return;
+    }
+    await reloadConversations();
+    setActiveConvId(conv.id);
     setTab('messages');
   };
 
-  const sendMessage = (convId, text) => {
-    if (!text.trim()) return;
+  const sendMessage = async (convId, text) => {
+    if (!text || !text.trim()) return;
     const trimmed = text.trim();
-    setConversations(prev => prev.map(c => {
-      if (c.id !== convId) return c;
-      const otherEmail = c.participants.find(p => p.email !== signup.email)?.email;
-      return {
-        ...c,
-        messages: [...c.messages, { from: signup.email, text: trimmed, time: new Date().toISOString() }],
-        lastUpdated: new Date().toISOString(),
-        unreadFor: otherEmail ? Array.from(new Set([...(c.unreadFor || []), otherEmail])) : (c.unreadFor || [])
-      };
-    }));
     setMessageDraft('');
+    const { error } = await kkSendMessage({ conversationId: convId, body: trimmed });
+    if (error) {
+      alert(`Couldn't send message: ${error.message}`);
+      return;
+    }
+    await reloadConversations();
   };
 
-  const markConversationRead = (convId) => {
+  const markConversationRead = async (convId) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await kkMarkConversationRead({ conversationId: convId, userId: user.id });
+    // Optimistic clear so the badge updates instantly without waiting on reload
     setConversations(prev => prev.map(c => c.id !== convId ? c : { ...c, unreadFor: (c.unreadFor || []).filter(e => e !== signup.email) }));
   };
 
@@ -1835,6 +1962,11 @@ export default function App() {
         if (apps && apps.length > 0) {
           setApplied(apps.map(a => a.job_id));
         }
+      }
+      // Load conversations regardless of role (works for both workers and owners).
+      {
+        const { data: convs } = await kkLoadConversationsForUser(user.id);
+        if (convs) setConversations(convs);
       }
       setSignedIn(true);
       setIsPartner(role === 'partner');
@@ -2996,10 +3128,12 @@ export default function App() {
               <div className="flex gap-2 pt-4 flex-wrap" style={{ borderTop: `1px solid ${c.border}` }}>
                 <button onClick={() => {
                   startOrOpenConversation({
+                    userId: viewingApplicantDetail.userId,
                     email: viewingApplicantDetail.email,
                     name: viewingApplicantDetail.name,
                     role: 'worker',
                     photo: viewingApplicantDetail.photo,
+                    jobId: viewingApplicantsFor.id,
                     jobTitle: viewingApplicantsFor.title
                   });
                   setViewingApplicantsFor(null);
