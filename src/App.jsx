@@ -6,7 +6,7 @@ import {
   Clock, DollarSign, X, Plus, FileText, ExternalLink,
   LogOut, Bookmark, LayoutGrid, CheckCircle2, Lock, Verified,
   AlertCircle, Edit3, Upload, Paperclip, Handshake, Megaphone,
-  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle
+  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff
 } from 'lucide-react';
 
 const c = {
@@ -1663,7 +1663,7 @@ export default function App() {
               <Input label="Email" value={partnerLoginForm.email} onChange={v => setPartnerLoginForm({...partnerLoginForm, email: v})} placeholder="you@yourbusiness.com" type="email" />
               <div>
                 <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Password</label>
-                <input type="password" value={partnerLoginForm.password} onChange={e => setPartnerLoginForm({...partnerLoginForm, password: e.target.value})} placeholder="Your password" onKeyDown={e => e.key === 'Enter' && handlePartnerLogin()} style={{ width: '100%', padding: '9px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+                <PasswordField value={partnerLoginForm.password} onChange={v => setPartnerLoginForm({ ...partnerLoginForm, password: v })} placeholder="Your password" onKeyDown={e => e.key === 'Enter' && handlePartnerLogin()} />
               </div>
             </div>
             <button onClick={handlePartnerLogin} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.gold, color: c.navy, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Log In as Partner</button>
@@ -1799,7 +1799,7 @@ export default function App() {
                   <label style={{ fontSize: 12.5, fontWeight: 600, color: c.text }}>Password</label>
                   <button onClick={() => { setResetStep('email'); setResetData({ email: loginForm.email, code: '', newPassword: '', confirmPassword: '' }); setResetError(''); setView('forgotPassword'); }} style={{ fontSize: 11.5, color: c.primary, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Forgot password?</button>
                 </div>
-                <input type="password" value={loginForm.password} onChange={e => setLoginForm({...loginForm, password: e.target.value})} placeholder="Your password" style={{ width: '100%', padding: '9px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} onKeyDown={e => e.key === 'Enter' && handleLogin()} />
+                <PasswordField value={loginForm.password} onChange={v => setLoginForm({ ...loginForm, password: v })} placeholder="Your password" onKeyDown={e => e.key === 'Enter' && handleLogin()} />
               </div>
 
               {/* Remember Me */}
@@ -1925,7 +1925,7 @@ export default function App() {
                 )}
                 <div>
                   <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Verification code</label>
-                  <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Enter code from email" maxLength={10} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.2em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} />
+                  <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="" maxLength={10} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.2em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} />
                 </div>
                 <button onClick={() => { if (enteredCode.length < 6) { setResetError('Enter the verification code from your email.'); return; } verifyResetCode(); }} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify Code</button>
               </>
@@ -1979,7 +1979,7 @@ export default function App() {
 
             <div>
               <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Verification code</label>
-              <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Enter code from email" maxLength={10} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.2em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} onKeyDown={e => e.key === 'Enter' && enteredCode.length >= 6 && handleVerifyEmail()} />
+              <input value={enteredCode} onChange={e => setEnteredCode(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="" maxLength={10} style={{ width: '100%', padding: '14px', fontSize: 22, textAlign: 'center', letterSpacing: '0.2em', border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', fontFamily: 'monospace', fontWeight: 700 }} onKeyDown={e => e.key === 'Enter' && enteredCode.length >= 6 && handleVerifyEmail()} />
             </div>
 
             <button onClick={handleVerifyEmail} style={{ width: '100%', marginTop: 16, padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Verify and Continue</button>
@@ -2995,11 +2995,58 @@ export default function App() {
   );
 }
 
+function PasswordField({ value, onChange, placeholder, onKeyDown, autoComplete = 'current-password' }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type={revealed ? 'text' : 'password'}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        onKeyDown={onKeyDown}
+        autoComplete={autoComplete}
+        style={{ width: '100%', padding: '9px 40px 9px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }}
+      />
+      <button
+        type="button"
+        onClick={() => setRevealed(v => !v)}
+        aria-label={revealed ? 'Hide password' : 'Show password'}
+        style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: c.textMuted, display: 'flex' }}
+      >
+        {revealed ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  );
+}
+
 function Input({ label, value, onChange, placeholder, type = 'text' }) {
+  const isPassword = type === 'password';
+  const [revealed, setRevealed] = useState(false);
+  const effectiveType = isPassword && revealed ? 'text' : type;
   return (
     <div>
       <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ width: '100%', padding: '9px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+      <div style={{ position: 'relative' }}>
+        <input
+          type={effectiveType}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          autoComplete={isPassword ? 'new-password' : undefined}
+          style={{ width: '100%', padding: isPassword ? '9px 40px 9px 12px' : '9px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }}
+        />
+        {isPassword && (
+          <button
+            type="button"
+            onClick={() => setRevealed(v => !v)}
+            aria-label={revealed ? 'Hide password' : 'Show password'}
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: c.textMuted, display: 'flex' }}
+          >
+            {revealed ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
