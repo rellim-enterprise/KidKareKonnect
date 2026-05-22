@@ -216,7 +216,9 @@ async function kkLoadApplicantsForJobs(jobIds) {
       positions: p.positions || [],
       bio: p.bio || '',
       resume: p.resume_filename || '',
+      resumeUrl: p.resume_url || '',
       credentialFiles: p.credential_filenames || [],
+      credentialUrls: p.credential_urls || [],
       appliedDate: formatRelativeTime(a.applied_at),
     });
   }
@@ -269,7 +271,9 @@ function profileStateToRow(profile) {
     positions: profile.positions || [],
     bio: profile.bio || null,
     resume_filename: profile.resume || null,
+    resume_url: profile.resumeUrl || null,
     credential_filenames: profile.credentialFiles || [],
+    credential_urls: profile.credentialUrls || [],
     photo_url: profile.photo || null,
   };
 }
@@ -291,7 +295,9 @@ function rowToProfileState(row, fallbackState) {
     positions: row.positions || [],
     bio: row.bio || '',
     resume: row.resume_filename || '',
+    resumeUrl: row.resume_url || '',
     credentialFiles: row.credential_filenames || [],
+    credentialUrls: row.credential_urls || [],
   };
 }
 
@@ -786,15 +792,34 @@ export default function App() {
     setShowListBiz(false);
   };
 
-  // Photo upload with auto-resize so storage doesn't bloat
+  // ============================================================
+  // File uploads — real files go to Supabase Storage (bucket: user-files)
+  // organized under {auth.uid()}/photo.jpg, /resume.pdf, /credentials/*.
+  // The public URL is stored in profile state so it works across devices.
+  // ============================================================
+  const [uploading, setUploading] = useState({ photo: false, resume: false, cred: false });
+
+  async function uploadToStorage(path, blob, contentType) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('You must be signed in to upload files.');
+    const fullPath = `${user.id}/${path}`;
+    const { error } = await supabase.storage
+      .from('user-files')
+      .upload(fullPath, blob, { contentType, upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from('user-files').getPublicUrl(fullPath);
+    return data.publicUrl;
+  }
+
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { alert('Photo must be under 5MB'); return; }
+    setUploading(u => ({ ...u, photo: true }));
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
         const max = 400;
         let { width, height } = img;
@@ -803,25 +828,78 @@ export default function App() {
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
-        setProfile(p => ({ ...p, photo: canvas.toDataURL('image/jpeg', 0.85) }));
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        // Optimistic preview while the upload runs
+        setProfile(p => ({ ...p, photo: dataUrl }));
+        try {
+          const blob = await (await fetch(dataUrl)).blob();
+          const publicUrl = await uploadToStorage(`photo-${Date.now()}.jpg`, blob, 'image/jpeg');
+          setProfile(p => ({ ...p, photo: publicUrl }));
+        } catch (err) {
+          alert(`Couldn't upload photo: ${err.message}`);
+        } finally {
+          setUploading(u => ({ ...u, photo: false }));
+        }
       };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   };
 
-  const handleResumeUpload = (e) => {
+  const handleResumeUpload = async (e) => {
     const f = e.target.files?.[0];
-    if (f) setProfile({...profile, resume: f.name});
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { alert('Resume must be under 10MB'); return; }
+    setUploading(u => ({ ...u, resume: true }));
+    try {
+      const ext = (f.name.split('.').pop() || 'pdf').toLowerCase();
+      const publicUrl = await uploadToStorage(`resume-${Date.now()}.${ext}`, f, f.type || 'application/pdf');
+      setProfile(p => ({ ...p, resume: f.name, resumeUrl: publicUrl }));
+    } catch (err) {
+      alert(`Couldn't upload resume: ${err.message}`);
+    } finally {
+      setUploading(u => ({ ...u, resume: false }));
+    }
   };
 
-  const handleCredFiles = (e) => {
+  const handleCredFiles = async (e) => {
     const files = Array.from(e.target.files || []);
-    const names = files.map(f => f.name);
-    setProfile({...profile, credentialFiles: [...(profile.credentialFiles || []), ...names]});
+    if (files.length === 0) return;
+    setUploading(u => ({ ...u, cred: true }));
+    try {
+      const uploaded = [];
+      for (const f of files) {
+        if (f.size > 10 * 1024 * 1024) { alert(`${f.name} is too large (10MB limit)`); continue; }
+        const ext = (f.name.split('.').pop() || 'bin').toLowerCase();
+        const safeName = f.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+        const publicUrl = await uploadToStorage(
+          `credentials/${Date.now()}-${safeName}`,
+          f,
+          f.type || `application/${ext}`
+        );
+        uploaded.push({ name: f.name, url: publicUrl });
+      }
+      setProfile(p => ({
+        ...p,
+        credentialFiles: [...(p.credentialFiles || []), ...uploaded.map(u => u.name)],
+        credentialUrls: [...(p.credentialUrls || []), ...uploaded.map(u => u.url)],
+      }));
+    } catch (err) {
+      alert(`Couldn't upload credential file: ${err.message}`);
+    } finally {
+      setUploading(u => ({ ...u, cred: false }));
+    }
   };
 
-  const removeCredFile = (name) => setProfile({...profile, credentialFiles: profile.credentialFiles.filter(f => f !== name)});
+  const removeCredFile = (name) => {
+    const idx = (profile.credentialFiles || []).indexOf(name);
+    if (idx === -1) return;
+    setProfile({
+      ...profile,
+      credentialFiles: profile.credentialFiles.filter((_, i) => i !== idx),
+      credentialUrls: (profile.credentialUrls || []).filter((_, i) => i !== idx),
+    });
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -2884,17 +2962,33 @@ export default function App() {
                 <DetailBox label="Documents">
                   <div className="space-y-1.5">
                     {viewingApplicantDetail.resume && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: c.paleBlue, borderRadius: 7 }}>
+                      <a
+                        href={viewingApplicantDetail.resumeUrl || '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => { if (!viewingApplicantDetail.resumeUrl) e.preventDefault(); }}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: c.paleBlue, borderRadius: 7, textDecoration: 'none', cursor: viewingApplicantDetail.resumeUrl ? 'pointer' : 'default' }}
+                      >
                         <div className="flex items-center gap-2" style={{ fontSize: 12.5, color: c.primaryDark, fontWeight: 600 }}><FileText size={13} color={c.primary} /> {viewingApplicantDetail.resume}</div>
-                        <span style={{ fontSize: 11, color: c.textMuted }}>Resume</span>
-                      </div>
+                        <span style={{ fontSize: 11, color: c.textMuted }}>{viewingApplicantDetail.resumeUrl ? 'Open' : 'Resume'}</span>
+                      </a>
                     )}
-                    {(viewingApplicantDetail.credentialFiles || []).map((f, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: c.paleBlue, borderRadius: 7 }}>
-                        <div className="flex items-center gap-2" style={{ fontSize: 12.5, color: c.primaryDark, fontWeight: 600 }}><Paperclip size={13} color={c.primary} /> {f}</div>
-                        <span style={{ fontSize: 11, color: c.textMuted }}>Certificate</span>
-                      </div>
-                    ))}
+                    {(viewingApplicantDetail.credentialFiles || []).map((f, i) => {
+                      const url = (viewingApplicantDetail.credentialUrls || [])[i];
+                      return (
+                        <a
+                          key={i}
+                          href={url || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => { if (!url) e.preventDefault(); }}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: c.paleBlue, borderRadius: 7, textDecoration: 'none', cursor: url ? 'pointer' : 'default' }}
+                        >
+                          <div className="flex items-center gap-2" style={{ fontSize: 12.5, color: c.primaryDark, fontWeight: 600 }}><Paperclip size={13} color={c.primary} /> {f}</div>
+                          <span style={{ fontSize: 11, color: c.textMuted }}>{url ? 'Open' : 'Certificate'}</span>
+                        </a>
+                      );
+                    })}
                   </div>
                 </DetailBox>
               )}
