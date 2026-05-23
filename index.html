@@ -66,14 +66,9 @@
         d.getElementsByTagName("head")[0].appendChild(s);
       })();
 
-      // Brand context that Crisp agents see on every conversation.
-      // (Permanent welcome text & operator card are configured in the
-      // Crisp dashboard: Chatbox Settings → Welcome Message.)
-      window.$crisp.push(["set", "session:data", [[
-        ["business_name", "Rellim Kid Kare Konnect"],
-        ["support_email", "info@kidkarekonnect.com"],
-        ["support_phone", "1-800-499-6349"]
-      ]]]);
+      // (Brand session data — business_name, support_email, support_phone —
+      // is pushed from React using the values in src/config.js so there's
+      // only one place to change them. See App.jsx for the $crisp.push.)
 
       // Fallback welcome shown the first time a visitor opens the chat
       // in a session, in case the dashboard welcome isn't configured yet.

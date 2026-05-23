@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from './supabase';
+import { SUPPORT_PHONE, SUPPORT_PHONE_TEL } from './config';
 import {
   Briefcase, GraduationCap, MapPin, Users, Search, Heart, Send,
   Check, Award, Shield, BookOpen, Building2, User, ArrowRight,
@@ -660,6 +661,20 @@ export default function App() {
       STORE.set(`kk_owner_${signup.email}`, { posted, jobApplicants, plan });
     }
   }, [posted, jobApplicants, plan, appLoaded, signedIn, signup.email, userType]);
+
+  // Brand context for the Crisp chat widget (business name, support
+  // email, support phone). Runs once on mount so every visitor — signed
+  // in or not — sees consistent contact info. The values come from
+  // src/config.js so changing the phone there updates everywhere.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const push = (args) => { (window.$crisp = window.$crisp || []).push(args); };
+    push(['set', 'session:data', [[
+      ['business_name', 'Rellim Kid Kare Konnect'],
+      ['support_email', 'info@kidkarekonnect.com'],
+      ['support_phone', SUPPORT_PHONE],
+    ]]]);
+  }, []);
 
   // Pass signed-in user info to the Crisp live chat widget so support
   // agents see who they're talking to. No-op until Crisp's script loads.
@@ -1346,11 +1361,11 @@ export default function App() {
                 <div style={{ fontSize: 14 }}>info@kidkarekonnect.com</div>
               </div>
             </a>
-            <a href="tel:18004996349" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 11, color: c.primaryDark, textDecoration: 'none', fontWeight: 600 }}>
+            <a href={SUPPORT_PHONE_TEL} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 11, color: c.primaryDark, textDecoration: 'none', fontWeight: 600 }}>
               <Phone size={18} color={c.primary} />
               <div>
                 <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Phone</div>
-                <div style={{ fontSize: 14 }}>1-800-499-6349</div>
+                <div style={{ fontSize: 14 }}>{SUPPORT_PHONE}</div>
               </div>
             </a>
           </div>
@@ -1520,8 +1535,8 @@ export default function App() {
             <a href="mailto:info@kidkarekonnect.com?subject=Rellim%20Kid%20Kare%20Konnect%20support%20request" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 10, color: c.primaryDark, textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>
               <Mail size={15} color={c.primary} /> info@kidkarekonnect.com
             </a>
-            <a href="tel:18004996349" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 10, color: c.primaryDark, textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>
-              <Phone size={15} color={c.primary} /> 1-800-499-6349
+            <a href={SUPPORT_PHONE_TEL} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1px solid ${c.lightBlue}`, borderRadius: 10, color: c.primaryDark, textDecoration: 'none', fontWeight: 600, fontSize: 14 }}>
+              <Phone size={15} color={c.primary} /> {SUPPORT_PHONE}
             </a>
           </div>
           <p style={{ marginTop: 10, fontSize: 13, color: c.textMuted }}>
@@ -3466,7 +3481,7 @@ function LiveChat() {
             <div style={{ marginTop: 12, padding: '10px 12px', background: c.white, border: `1px solid ${c.borderSoft}`, borderRadius: 10, fontSize: 12.5, color: c.text, lineHeight: 1.5 }}>
               <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>Reach us directly</div>
               <a href="mailto:info@kidkarekonnect.com" style={{ display: 'flex', alignItems: 'center', gap: 7, color: c.primary, textDecoration: 'none', fontWeight: 600, marginBottom: 4 }}><Mail size={12} /> info@kidkarekonnect.com</a>
-              <a href="tel:18004996349" style={{ display: 'flex', alignItems: 'center', gap: 7, color: c.primary, textDecoration: 'none', fontWeight: 600 }}><Phone size={12} /> 1-800-499-6349</a>
+              <a href={SUPPORT_PHONE_TEL} style={{ display: 'flex', alignItems: 'center', gap: 7, color: c.primary, textDecoration: 'none', fontWeight: 600 }}><Phone size={12} /> {SUPPORT_PHONE}</a>
             </div>
 
             <p style={{ marginTop: 10, fontSize: 11, color: c.textMuted, lineHeight: 1.5, fontStyle: 'italic' }}>
