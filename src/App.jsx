@@ -7,7 +7,7 @@ import {
   Clock, DollarSign, X, Plus, FileText, ExternalLink,
   LogOut, Bookmark, LayoutGrid, CheckCircle2, Lock, Verified,
   AlertCircle, Edit3, Upload, Paperclip, Handshake, Megaphone,
-  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff
+  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff, Circle
 } from 'lucide-react';
 
 const c = {
@@ -56,10 +56,206 @@ const JOB_TEMPLATES = [
 ];
 
 const PRICING = [
-  { name: 'Starter', price: 79, tagline: 'For single centers just getting started', features: ['Up to 3 active job posts','Basic applicant profiles','Email support','1 admin user','State licensing guide access','7 day free trial'], highlight: false },
-  { name: 'Professional', price: 129, tagline: 'For growing centers ready to hire faster', features: ['Up to 10 active job posts','Full applicant credentials and documents','Priority email and phone support','3 admin users','Featured listing badge','Background check verification status','Automated applicant messaging','7 day free trial'], highlight: true, badge: 'Most Popular' },
-  { name: 'Enterprise', price: 159, tagline: 'For multi center owners and franchises', features: ['Unlimited job posts','White-glove onboarding','Dedicated account manager','Unlimited admin users','Premium placement on Browse Jobs','Custom branding on listings','Advanced analytics dashboard','API access for HR systems','7 day free trial'], highlight: false }
+  {
+    name: 'Konnect Basic',
+    tier: 'basic',
+    price: 99,
+    tagline: 'Start hiring with the essentials',
+    monthlyJobLimit: 3,
+    features: [
+      'Up to 3 job postings per month',
+      'Basic applicant management',
+      'Email support',
+      '7 day free trial',
+    ],
+    highlight: false,
+  },
+  {
+    name: 'Konnect Pro',
+    tier: 'pro',
+    price: 149,
+    tagline: 'Smarter hiring with verification',
+    monthlyJobLimit: 6,
+    features: [
+      'Up to 6 job postings per month',
+      'Background checks included',
+      'Professional Readiness Score access',
+      'Reliability indicators',
+      'Verification badges',
+      'Priority email support',
+      '7 day free trial',
+    ],
+    highlight: false,
+  },
+  {
+    name: 'Konnect Premium',
+    tier: 'premium',
+    price: 200,
+    tagline: 'Premium hiring for serious centers',
+    monthlyJobLimit: null,
+    features: [
+      'Unlimited job postings',
+      'Unlimited applicants',
+      'Premium screening tools',
+      'Professional Readiness Scores',
+      'Reliability indicators',
+      'Verification badges',
+      'Trusted Teacher Network access',
+      'Priority phone & email support',
+      '7 day free trial',
+    ],
+    highlight: true,
+    badge: 'Most Popular',
+  },
+  {
+    name: 'Konnect Elite',
+    tier: 'elite',
+    price: 400,
+    tagline: 'Multi-center owners & franchises',
+    monthlyJobLimit: null,
+    features: [
+      'Everything in Premium',
+      'Multi-center management (up to 5 centers)',
+      'Trusted Teacher Network access',
+      'Advanced filtering & search',
+      'Premium visibility tools',
+      'Priority support',
+      'Unlimited applicants',
+      '7 day free trial',
+    ],
+    highlight: false,
+  },
 ];
+
+// Feature gating by plan tier. Higher tier = more access.
+const PLAN_TIER_RANK = { basic: 1, pro: 2, premium: 3, elite: 4 };
+
+function planTierRank(planName) {
+  if (!planName) return 0;
+  const found = PRICING.find(p => p.name === planName);
+  return found ? (PLAN_TIER_RANK[found.tier] || 0) : 0;
+}
+
+function hasFeature(planName, feature) {
+  const rank = planTierRank(planName);
+  switch (feature) {
+    case 'readiness_score':
+    case 'verification_badges':
+    case 'reliability_indicators':
+    case 'background_checks':
+      return rank >= 2; // Pro and up
+    case 'trusted_network':
+    case 'unlimited_jobs':
+      return rank >= 3; // Premium and up
+    case 'multi_center':
+    case 'advanced_filtering':
+      return rank >= 4; // Elite
+    default:
+      return rank >= 1;
+  }
+}
+
+// Hiring stages — DB statuses + display labels. Other DB-valid statuses
+// ('reviewed','withdrawn') are accepted but not shown in the picker UI.
+const HIRING_STAGES = [
+  { value: 'applied', label: 'Applied' },
+  { value: 'interviewing', label: 'Interview Scheduled' },
+  { value: 'hired', label: 'Hired' },
+  { value: 'declined', label: 'Declined' },
+];
+
+function hiringStageLabel(value) {
+  const found = HIRING_STAGES.find(s => s.value === value);
+  return found ? found.label : 'Applied';
+}
+
+async function kkUpdateApplicationStatus(appId, newStatus) {
+  return supabase.from('applications').update({ status: newStatus }).eq('id', appId);
+}
+
+async function kkLoadSavedCandidates(ownerId) {
+  const { data, error } = await supabase
+    .from('saved_candidates')
+    .select('worker_id')
+    .eq('owner_id', ownerId)
+    .order('created_at', { ascending: false });
+  return { data: (data || []).map(r => r.worker_id), error };
+}
+
+async function kkToggleSaveCandidate(ownerId, workerId, currentlySaved) {
+  if (currentlySaved) {
+    return supabase
+      .from('saved_candidates')
+      .delete()
+      .eq('owner_id', ownerId)
+      .eq('worker_id', workerId);
+  }
+  return supabase
+    .from('saved_candidates')
+    .insert({ owner_id: ownerId, worker_id: workerId });
+}
+
+// ============================================================
+// Professional Readiness Score
+// ============================================================
+// Components that work today (computed from profile data):
+//   - Complete Profile (+10)
+//   - Portable Background Check (+20)
+//   - CPR Certification (+15)
+//   - CDA / Credentials (+15)
+//   - No No-Shows (+5, default — presumed good for new users)
+// Components that require future tracking systems (default to 0 for now):
+//   - Fast Response Time (+10)  → needs message-response tracking
+//   - Positive Employer Reviews (+15)  → needs review system
+//   - Completed Shifts / Jobs (+10)  → needs shift-completion tracking
+// As those systems come online they slot directly into this function.
+function calculateReadinessScore(profile, history = {}) {
+  if (!profile) return { total: 0, breakdown: [], badges: [] };
+  const completeFields = ['city', 'state', 'bio', 'education', 'availability'];
+  const filledCount = completeFields.filter(k => (profile[k] || '').toString().trim().length > 0).length;
+  const hasPositions = (profile.positions || []).length > 0;
+  const hasAgeGroups = (profile.ageGroups || []).length > 0;
+  const profileComplete = filledCount === completeFields.length && hasPositions && hasAgeGroups;
+
+  const bg = (profile.bgCheck || '').toLowerCase();
+  const portableBg = bg.includes('portable');
+  const anyBg = bg && !bg.includes('not started');
+
+  const creds = (profile.credentials || []).map(s => s.toLowerCase());
+  const credFiles = (profile.credentialFiles || []).map(s => s.toLowerCase());
+  const hasCpr = creds.some(s => s.includes('cpr')) || credFiles.some(s => s.includes('cpr'));
+  const hasCda = creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
+  const hasOtherCred = (profile.credentials || []).length > 0 || (profile.education && profile.education !== 'Some College');
+
+  // Reputation-based — pulled from history when available, otherwise default.
+  const responseRateScore = history.fastResponseRate ? Math.round(history.fastResponseRate * 10) : 0;
+  const reviewScore = history.positiveReviewRate ? Math.round(history.positiveReviewRate * 15) : 0;
+  const completedShifts = history.completedShifts || 0;
+  const completedShiftsScore = Math.min(10, Math.floor(completedShifts / 3) * 2);
+  const noShows = history.noShows || 0;
+  const noShowScore = noShows === 0 ? 5 : noShows === 1 ? 3 : 0;
+
+  const breakdown = [
+    { label: 'Complete Profile', earned: profileComplete ? 10 : 0, max: 10, achieved: profileComplete, tip: 'Fill in your city, state, bio, education, availability, positions, and age groups.' },
+    { label: 'Portable Background Check', earned: portableBg ? 20 : (anyBg ? 5 : 0), max: 20, achieved: portableBg, tip: 'A portable background check lets you start work right away. Upload yours under Background Check.' },
+    { label: 'CPR Certification', earned: hasCpr ? 15 : 0, max: 15, achieved: hasCpr, tip: 'Add your CPR & First Aid card to your credentials.' },
+    { label: 'CDA / Credentials', earned: hasCda ? 15 : (hasOtherCred ? 8 : 0), max: 15, achieved: hasCda, tip: 'Upload your CDA or higher childcare credential to boost your score.' },
+    { label: 'Fast Response Time', earned: responseRateScore, max: 10, achieved: responseRateScore >= 8, tip: 'Respond to messages within 24 hours to keep your score high.' },
+    { label: 'Positive Employer Reviews', earned: reviewScore, max: 15, achieved: reviewScore >= 12, tip: 'Earn 5-star reviews from centers you work with.' },
+    { label: 'Completed Shifts / Jobs', earned: completedShiftsScore, max: 10, achieved: completedShiftsScore >= 8, tip: 'Complete shifts and finish jobs you accept to build your track record.' },
+    { label: 'No No-Shows', earned: noShowScore, max: 5, achieved: noShowScore === 5, tip: 'Show up to every shift you commit to.' },
+  ];
+  const total = breakdown.reduce((s, b) => s + b.earned, 0);
+
+  const badges = [];
+  if (portableBg) badges.push({ key: 'portable_bg', label: 'Portable Background Check', icon: 'shield' });
+  if (hasCpr) badges.push({ key: 'cpr', label: 'CPR Certified', icon: 'heart' });
+  if (hasCda) badges.push({ key: 'cda', label: 'CDA Verified', icon: 'verified' });
+  if (total >= 75) badges.push({ key: 'ready', label: 'Ready to Work', icon: 'check' });
+  if (total >= 90) badges.push({ key: 'high_reliability', label: 'High Reliability', icon: 'star' });
+
+  return { total, breakdown, badges, profileComplete };
+}
 
 const AGE_GROUPS = ['Infant','Toddler','Preschool','Pre K','School Age'];
 const CREDENTIALS_LIST = ['CDA','State Preservice','CPR and First Aid','Director Credential','Associate in ECE','Bachelor in ECE','None yet'];
@@ -182,7 +378,7 @@ async function kkLoadApplicantsForJobs(jobIds) {
   if (!jobIds || jobIds.length === 0) return { data: {}, error: null };
   const { data: apps, error: appsErr } = await supabase
     .from('applications')
-    .select('id, job_id, worker_id, applied_at')
+    .select('id, job_id, worker_id, status, applied_at')
     .in('job_id', jobIds)
     .order('applied_at', { ascending: false });
   if (appsErr) return { data: {}, error: appsErr };
@@ -201,6 +397,8 @@ async function kkLoadApplicantsForJobs(jobIds) {
     const p = byWorker[a.worker_id];
     if (!p) continue;
     grouped[a.job_id].push({
+      appId: a.id,
+      status: a.status || 'applied',
       userId: a.worker_id,
       name: p.name || 'Applicant',
       email: p.email || '',
@@ -451,6 +649,12 @@ export default function App() {
   const [viewingApplicantsFor, setViewingApplicantsFor] = useState(null);
   const [viewingApplicantDetail, setViewingApplicantDetail] = useState(null);
   const [jobApplicants, setJobApplicants] = useState({});
+  const [savedCandidateIds, setSavedCandidateIds] = useState([]);
+  const [applicantStageFilter, setApplicantStageFilter] = useState('all');
+  const [showSavedCandidates, setShowSavedCandidates] = useState(false);
+  const [savedCandidatesFull, setSavedCandidatesFull] = useState([]);
+  const [showTrustedNetwork, setShowTrustedNetwork] = useState(false);
+  const [trustedNetworkFull, setTrustedNetworkFull] = useState([]);
   const [showSaveToast, setShowSaveToast] = useState(false);
   const [newJob, setNewJob] = useState({ title: '', location: '', type: 'Full Time', pay: '', description: '' });
   const [signup, setSignup] = useState({ name: '', email: '', phone: '', state: 'Georgia', center: '', password: '' });
@@ -591,6 +795,10 @@ export default function App() {
         {
           const { data: convs } = await kkLoadConversationsForUser(session.user.id);
           if (convs) setConversations(convs);
+        }
+        if (role === 'owner') {
+          const { data: saved } = await kkLoadSavedCandidates(session.user.id);
+          if (saved) setSavedCandidateIds(saved);
         }
         setView('app');
       } else {
@@ -1048,6 +1256,83 @@ export default function App() {
   // MESSAGING — backed by Supabase. The UI keeps the same shape; we
   // reload after every write so unread flags + last-message ordering
   // come straight from the DB triggers.
+  // Load full profile data for saved candidates when the modal opens.
+  useEffect(() => {
+    if (!showSavedCandidates) return;
+    (async () => {
+      if (savedCandidateIds.length === 0) { setSavedCandidatesFull([]); return; }
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', savedCandidateIds);
+      setSavedCandidatesFull(data || []);
+    })();
+  }, [showSavedCandidates, savedCandidateIds]);
+
+  // Load Trusted Teacher Network — workers with profile_complete=true and
+  // bg_check=Portable. (For now this is the working definition; admin
+  // curation/invite-only flagging is a future feature.)
+  useEffect(() => {
+    if (!showTrustedNetwork) return;
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'worker')
+        .eq('profile_complete', true)
+        .limit(50);
+      // Only include those with a strong readiness score
+      const ranked = (data || [])
+        .map(p => ({ profile: p, score: calculateReadinessScore(rowToProfileState(p)).total }))
+        .filter(x => x.score >= 70)
+        .sort((a, b) => b.score - a.score);
+      setTrustedNetworkFull(ranked);
+    })();
+  }, [showTrustedNetwork]);
+
+  const toggleSaveCandidate = async (workerId) => {
+    if (!workerId) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const currentlySaved = savedCandidateIds.includes(workerId);
+    // Optimistic update
+    setSavedCandidateIds(prev => currentlySaved ? prev.filter(id => id !== workerId) : [...prev, workerId]);
+    const { error } = await kkToggleSaveCandidate(user.id, workerId, currentlySaved);
+    if (error) {
+      // Revert on error
+      setSavedCandidateIds(prev => currentlySaved ? [...prev, workerId] : prev.filter(id => id !== workerId));
+      alert(`Couldn't ${currentlySaved ? 'remove' : 'save'} candidate: ${error.message}`);
+    }
+  };
+
+  const updateApplicantStage = async (appId, newStatus, jobId) => {
+    if (!appId) return;
+    const { error } = await kkUpdateApplicationStatus(appId, newStatus);
+    if (error) {
+      alert(`Couldn't update stage: ${error.message}`);
+      return;
+    }
+    // Reflect locally without a full refetch
+    setJobApplicants(prev => {
+      const updated = { ...prev };
+      if (jobId && updated[jobId]) {
+        updated[jobId] = updated[jobId].map(a =>
+          a.appId === appId ? { ...a, status: newStatus } : a
+        );
+      } else {
+        for (const k of Object.keys(updated)) {
+          updated[k] = updated[k].map(a =>
+            a.appId === appId ? { ...a, status: newStatus } : a
+          );
+        }
+      }
+      return updated;
+    });
+    if (viewingApplicantDetail && viewingApplicantDetail.appId === appId) {
+      setViewingApplicantDetail({ ...viewingApplicantDetail, status: newStatus });
+    }
+  };
+
   const reloadConversations = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -1983,6 +2268,10 @@ export default function App() {
         const { data: convs } = await kkLoadConversationsForUser(user.id);
         if (convs) setConversations(convs);
       }
+      if (role === 'owner') {
+        const { data: saved } = await kkLoadSavedCandidates(user.id);
+        if (saved) setSavedCandidateIds(saved);
+      }
       setSignedIn(true);
       setIsPartner(role === 'partner');
       await STORE.set('kk_auth', {
@@ -2426,7 +2715,7 @@ export default function App() {
               <CheckCircle2 size={13} /> 7-DAY FREE TRIAL · NO CHARGE TODAY
             </div>
           </div>
-          <div className="grid md:grid-cols-3 gap-5 max-w-5xl mx-auto" style={{ alignItems: 'stretch' }}>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-6xl mx-auto" style={{ alignItems: 'stretch' }}>
             {PRICING.map((t, i) => (
               <div key={i} style={{ background: t.highlight ? `linear-gradient(180deg, ${c.primary} 0%, ${c.primaryDark} 100%)` : c.white, border: t.highlight ? `2px solid ${c.primary}` : `1.5px solid ${c.border}`, borderRadius: 16, padding: '28px 22px 22px', position: 'relative', transform: t.highlight ? 'translateY(-8px)' : 'none', boxShadow: t.highlight ? '0 14px 36px rgba(43, 95, 126, 0.25)' : '0 2px 6px rgba(15, 42, 61, 0.05)', display: 'flex', flexDirection: 'column' }}>
                 {t.badge && <div style={{ position: 'absolute', top: -13, left: '50%', transform: 'translateX(-50%)', background: c.gold, color: c.navy, fontSize: 11, fontWeight: 800, padding: '5px 14px', borderRadius: 999, letterSpacing: '0.08em', textTransform: 'uppercase', boxShadow: '0 4px 10px rgba(212, 165, 71, 0.45)' }}>{t.badge}</div>}
@@ -2498,12 +2787,31 @@ export default function App() {
                 </p>
               </div>
               {signedIn && userType === 'owner' && (
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => setShowSavedCandidates(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 12px', background: c.white, color: c.coralDark, border: `1.5px solid ${c.coralDark}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}><Heart size={13} fill={c.coralDark} /> Saved ({savedCandidateIds.length})</button>
+                  <button
+                    onClick={() => { if (hasFeature(plan, 'trusted_network')) setShowTrustedNetwork(true); else setView('pricing'); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 12px', background: hasFeature(plan, 'trusted_network') ? c.gold : c.white, color: hasFeature(plan, 'trusted_network') ? c.navy : c.textMuted, border: `1.5px solid ${hasFeature(plan, 'trusted_network') ? c.gold : c.border}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}
+                    title={hasFeature(plan, 'trusted_network') ? 'Browse Trusted Teacher Network' : 'Premium feature — upgrade to access'}
+                  >
+                    {hasFeature(plan, 'trusted_network') ? <Verified size={13} fill={c.navy} stroke={c.gold} /> : <Lock size={13} />} Trusted Network
+                  </button>
                   <button onClick={() => setTab('templates')} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 12px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}><LayoutGrid size={13} /> Templates</button>
                   <button onClick={() => setShowPost(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 12px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}><Plus size={13} /> Post Job</button>
                 </div>
               )}
             </div>
+
+            {/* Owner CTA banner about readiness scores + verification */}
+            {signedIn && userType === 'owner' && posted.length > 0 && (
+              <div style={{ background: `linear-gradient(135deg, ${c.paleBlue} 0%, ${c.cream} 100%)`, border: `1px solid ${c.lightBlue}`, borderRadius: 12, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Verified size={20} fill={c.gold} stroke={c.white} strokeWidth={2.5} />
+                <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: c.navy, lineHeight: 1.4 }}>
+                  Use <strong>Professional Readiness Scores</strong> and <strong>Verification Badges</strong> to identify reliable, qualified childcare professionals faster.
+                  {!hasFeature(plan, 'readiness_score') && <button onClick={() => setView('pricing')} style={{ marginLeft: 8, color: c.primary, background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: 12.5, fontWeight: 700 }}>Upgrade to Pro</button>}
+                </div>
+              </div>
+            )}
 
             {userType !== 'owner' && (
               <>
@@ -2859,6 +3167,11 @@ export default function App() {
               <div style={{ fontSize: 11, color: c.success, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} /> Auto saving</div>
             </div>
 
+            {/* Professional Readiness Score */}
+            <div style={{ marginBottom: 16 }}>
+              <ReadinessScoreCard profile={profile} mode="worker" />
+            </div>
+
             <div className="grid lg:grid-cols-3 gap-4">
               {/* Profile preview card */}
               <div style={{ background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 14, padding: 22, textAlign: 'center', height: 'fit-content', position: 'sticky', top: 90 }}>
@@ -3034,6 +3347,133 @@ export default function App() {
       )}
 
       {/* APPLICANTS LIST + DETAIL */}
+      {/* Saved Candidates modal */}
+      {showSavedCandidates && (
+        <Modal onClose={() => setShowSavedCandidates(false)} wide>
+          <div className="flex items-center justify-between mb-3">
+            <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>Saved Candidates</h3>
+            <button onClick={() => setShowSavedCandidates(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+          <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 14 }}>{savedCandidatesFull.length} saved across all your job posts. Tap the heart to remove.</p>
+          {savedCandidatesFull.length === 0 ? (
+            <div style={{ padding: 36, textAlign: 'center', background: c.cream, borderRadius: 10 }}>
+              <Heart size={24} color={c.textMuted} style={{ margin: '0 auto 8px' }} />
+              <p style={{ fontSize: 13, color: c.textMuted }}>No saved candidates yet. Tap the heart on any applicant card to save them here.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {savedCandidatesFull.map((p) => {
+                const candidateUi = {
+                  userId: p.id,
+                  name: p.name || 'Candidate',
+                  email: p.email,
+                  phone: p.phone,
+                  photo: p.photo_url,
+                  city: p.city,
+                  state: p.state,
+                  years: p.years_experience,
+                  ageGroups: p.age_groups || [],
+                  education: p.education,
+                  credentials: p.credentials || [],
+                  bgCheck: p.bg_check,
+                  availability: p.availability,
+                  positions: p.positions || [],
+                  bio: p.bio,
+                  resume: p.resume_filename,
+                  resumeUrl: p.resume_url,
+                  credentialFiles: p.credential_filenames || [],
+                  credentialUrls: p.credential_urls || [],
+                };
+                const sc = calculateReadinessScore(candidateUi).total;
+                return (
+                  <div key={p.id} style={{ border: `1.5px solid ${c.border}`, borderRadius: 11, padding: 14, background: c.white, display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <Avatar name={candidateUi.name} photo={candidateUi.photo} size={48} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 3 }}>
+                        <div style={{ fontSize: 14.5, fontWeight: 700, color: c.navy }}>{candidateUi.name}</div>
+                        {hasFeature(plan, 'readiness_score') && <span style={{ fontSize: 11, fontWeight: 800, color: sc >= 70 ? c.success : c.gold }}>⭐ {sc}%</span>}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: c.textMuted }}>{candidateUi.city}, {candidateUi.state} · {candidateUi.years || 'New'}</div>
+                    </div>
+                    <button onClick={() => { setShowSavedCandidates(false); setViewingApplicantDetail(candidateUi); }} style={{ padding: '7px 12px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>View</button>
+                    <button onClick={() => toggleSaveCandidate(p.id)} aria-label="Remove from saved" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }}><Heart size={20} color={c.coralDark} fill={c.coralDark} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Trusted Teacher Network modal */}
+      {showTrustedNetwork && (
+        <Modal onClose={() => setShowTrustedNetwork(false)} wide>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="flex items-center gap-2" style={{ marginBottom: 3 }}>
+                <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>Trusted Teacher Network</h3>
+                <span style={{ background: c.gold, color: c.navy, fontSize: 10.5, fontWeight: 800, padding: '2px 8px', borderRadius: 999, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Premium</span>
+              </div>
+              <p style={{ fontSize: 12.5, color: c.textMuted }}>Verified teachers with high reliability scores, strong credentials, and proven track records.</p>
+            </div>
+            <button onClick={() => setShowTrustedNetwork(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+          {trustedNetworkFull.length === 0 ? (
+            <div style={{ padding: 36, textAlign: 'center', background: c.cream, borderRadius: 10 }}>
+              <Verified size={24} color={c.textMuted} style={{ margin: '0 auto 8px' }} />
+              <p style={{ fontSize: 13, color: c.textMuted }}>The network is still growing. Teachers earn an invitation by reaching a Readiness Score of 70+ with verified background checks and credentials.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {trustedNetworkFull.map(({ profile: p, score }) => {
+                const candidateUi = {
+                  userId: p.id,
+                  name: p.name || 'Teacher',
+                  email: p.email,
+                  phone: p.phone,
+                  photo: p.photo_url,
+                  city: p.city,
+                  state: p.state,
+                  years: p.years_experience,
+                  ageGroups: p.age_groups || [],
+                  education: p.education,
+                  credentials: p.credentials || [],
+                  bgCheck: p.bg_check,
+                  availability: p.availability,
+                  positions: p.positions || [],
+                  bio: p.bio,
+                  resume: p.resume_filename,
+                  resumeUrl: p.resume_url,
+                  credentialFiles: p.credential_filenames || [],
+                  credentialUrls: p.credential_urls || [],
+                };
+                const isSaved = savedCandidateIds.includes(p.id);
+                return (
+                  <div key={p.id} style={{ border: `1.5px solid ${c.gold}`, borderRadius: 11, padding: 14, background: `linear-gradient(135deg, ${c.white} 0%, ${c.paleBlue} 100%)`, display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <Avatar name={candidateUi.name} photo={candidateUi.photo} size={52} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap" style={{ marginBottom: 3 }}>
+                        <div style={{ fontSize: 14.5, fontWeight: 700, color: c.navy }}>{candidateUi.name}</div>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: c.success }}>⭐ {score}%</span>
+                        <span style={{ background: c.gold, color: c.navy, fontSize: 9.5, fontWeight: 800, padding: '1px 7px', borderRadius: 999 }}>TRUSTED</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: c.textMuted, marginBottom: 4 }}>{candidateUi.city}, {candidateUi.state} · {candidateUi.years || 'Experienced'}</div>
+                      <div className="flex flex-wrap gap-1">
+                        {(candidateUi.credentials || []).slice(0, 3).map((cr, j) => <span key={j} style={{ fontSize: 10, padding: '2px 7px', background: c.lightBlue, color: c.primaryDark, borderRadius: 999, fontWeight: 600 }}>{cr}</span>)}
+                      </div>
+                    </div>
+                    <button onClick={() => { setShowTrustedNetwork(false); setViewingApplicantDetail(candidateUi); }} style={{ padding: '7px 12px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>View</button>
+                    <button onClick={() => toggleSaveCandidate(p.id)} aria-label={isSaved ? 'Unsave' : 'Save'} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4 }}>
+                      <Heart size={20} color={isSaved ? c.coralDark : c.textMuted} fill={isSaved ? c.coralDark : 'transparent'} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
+
       {viewingApplicantsFor && (
         <Modal onClose={() => { setViewingApplicantsFor(null); setViewingApplicantDetail(null); }} wide>
           {viewingApplicantDetail ? (
@@ -3060,6 +3500,22 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {/* Readiness Score & verification badges — Pro+ feature */}
+              {hasFeature(plan, 'readiness_score') ? (
+                <div style={{ marginBottom: 16 }}>
+                  <ReadinessScoreCard profile={viewingApplicantDetail} mode="owner" />
+                </div>
+              ) : (
+                <div style={{ background: c.cream, border: `1px dashed ${c.border}`, borderRadius: 12, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <Lock size={18} color={c.textMuted} />
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Professional Readiness Score & Verification Badges</div>
+                    <div style={{ fontSize: 12, color: c.textMuted, marginTop: 2 }}>Available on Konnect Pro, Premium, and Elite plans. Spot reliable, qualified candidates faster.</div>
+                  </div>
+                  <button onClick={() => setView('pricing')} style={{ padding: '7px 12px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Upgrade</button>
+                </div>
+              )}
 
               <div className="grid md:grid-cols-2 gap-4 mb-4">
                 <DetailBox label="Contact">
@@ -3164,6 +3620,40 @@ export default function App() {
             <div>
               <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy, marginBottom: 3 }}>Applicants for {viewingApplicantsFor.title}</h3>
               <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 14 }}>{(jobApplicants[viewingApplicantsFor.id] || []).length} applicant{(jobApplicants[viewingApplicantsFor.id] || []).length === 1 ? '' : 's'} · {viewingApplicantsFor.location}</p>
+
+              {/* Stage filter chips */}
+              {(jobApplicants[viewingApplicantsFor.id] || []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5" style={{ marginBottom: 12 }}>
+                  {[{value: 'all', label: 'All'}, ...HIRING_STAGES].map(s => {
+                    const isActive = applicantStageFilter === s.value;
+                    const count = s.value === 'all'
+                      ? (jobApplicants[viewingApplicantsFor.id] || []).length
+                      : (jobApplicants[viewingApplicantsFor.id] || []).filter(a => (a.status || 'applied') === s.value).length;
+                    return (
+                      <button
+                        key={s.value}
+                        onClick={() => setApplicantStageFilter(s.value)}
+                        style={{
+                          padding: '5px 11px',
+                          background: isActive ? c.primary : c.white,
+                          color: isActive ? c.white : c.text,
+                          border: `1px solid ${isActive ? c.primary : c.border}`,
+                          borderRadius: 999,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                        }}
+                      >
+                        {s.label} <span style={{ background: isActive ? 'rgba(255,255,255,0.25)' : c.cream, color: isActive ? c.white : c.textMuted, padding: '1px 6px', borderRadius: 999, fontSize: 10.5, fontWeight: 700 }}>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               {(jobApplicants[viewingApplicantsFor.id] || []).length === 0 ? (
                 <div style={{ padding: 36, textAlign: 'center', background: c.cream, borderRadius: 10 }}>
                   <Users size={24} color={c.textMuted} style={{ margin: '0 auto 8px' }} />
@@ -3171,28 +3661,61 @@ export default function App() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {(jobApplicants[viewingApplicantsFor.id] || []).map((a, i) => (
-                    <button key={i} onClick={() => setViewingApplicantDetail(a)} style={{ width: '100%', textAlign: 'left', border: `1.5px solid ${c.border}`, borderRadius: 11, padding: 14, background: c.white, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center' }} className="hover:border-blue-400 hover:shadow-md transition-all">
-                      <Avatar name={a.name} photo={a.photo} size={48} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <div style={{ fontSize: 14.5, fontWeight: 700, color: c.navy }}>{a.name}</div>
-                          {a.bgCheck === 'Cleared and current' && <Verified size={13} fill={c.success} stroke={c.white} strokeWidth={2.5} />}
-                          {a.bgCheck === 'Portable background check' && <span title="Portable background check" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', background: c.coralDark, color: c.white, borderRadius: 999, fontSize: 9.5, fontWeight: 700 }}><Shield size={9} /> Portable</span>}
+                  {(jobApplicants[viewingApplicantsFor.id] || [])
+                    .filter(a => applicantStageFilter === 'all' || (a.status || 'applied') === applicantStageFilter)
+                    .map((a, i) => {
+                      const isSaved = savedCandidateIds.includes(a.userId);
+                      const currentStage = a.status || 'applied';
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setViewingApplicantDetail(a)}
+                          role="button"
+                          tabIndex={0}
+                          style={{ width: '100%', textAlign: 'left', border: `1.5px solid ${c.border}`, borderRadius: 11, padding: 14, background: c.white, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center' }}
+                          className="hover:border-blue-400 hover:shadow-md transition-all"
+                        >
+                          <Avatar name={a.name} photo={a.photo} size={48} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <div style={{ fontSize: 14.5, fontWeight: 700, color: c.navy }}>{a.name}</div>
+                              {a.bgCheck === 'Cleared and current' && <Verified size={13} fill={c.success} stroke={c.white} strokeWidth={2.5} />}
+                              {a.bgCheck === 'Portable background check' && <span title="Portable background check" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 6px', background: c.coralDark, color: c.white, borderRadius: 999, fontSize: 9.5, fontWeight: 700 }}><Shield size={9} /> Portable</span>}
+                              {hasFeature(plan, 'readiness_score') && (() => {
+                                const sc = calculateReadinessScore(a).total;
+                                return <span style={{ fontSize: 11, fontWeight: 800, color: sc >= 70 ? c.success : sc >= 50 ? c.gold : c.textMuted }}>⭐ {sc}%</span>;
+                              })()}
+                            </div>
+                            <div className="flex flex-wrap gap-x-2.5 gap-y-0.5" style={{ fontSize: 11.5, color: c.textMuted }}>
+                              <span className="flex items-center gap-1"><MapPin size={10} /> {a.city}, {a.state}</span>
+                              <span className="flex items-center gap-1"><Clock size={10} /> {a.years}</span>
+                              {a.availability && <span>· {a.availability}</span>}
+                            </div>
+                            <div className="flex flex-wrap gap-1 mt-1.5 items-center">
+                              {(a.credentials || []).slice(0, 3).map((cr, j) => <span key={j} style={{ fontSize: 10, padding: '2px 7px', background: c.lightBlue, color: c.primaryDark, borderRadius: 999, fontWeight: 600 }}>{cr}</span>)}
+                              {(a.credentials || []).length > 3 && <span style={{ fontSize: 10, color: c.textMuted, fontWeight: 600 }}>+{a.credentials.length - 3} more</span>}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleSaveCandidate(a.userId); }}
+                              aria-label={isSaved ? 'Remove from saved' : 'Save candidate'}
+                              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, display: 'flex' }}
+                            >
+                              <Heart size={20} color={isSaved ? c.coralDark : c.textMuted} fill={isSaved ? c.coralDark : 'transparent'} />
+                            </button>
+                            <select
+                              value={currentStage}
+                              onClick={e => e.stopPropagation()}
+                              onChange={e => { e.stopPropagation(); updateApplicantStage(a.appId, e.target.value, viewingApplicantsFor.id); }}
+                              style={{ fontSize: 11.5, fontWeight: 700, padding: '4px 8px', border: `1px solid ${c.border}`, borderRadius: 7, background: c.white, color: c.navy, cursor: 'pointer' }}
+                            >
+                              {HIRING_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                            </select>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-x-2.5 gap-y-0.5" style={{ fontSize: 11.5, color: c.textMuted }}>
-                          <span className="flex items-center gap-1"><MapPin size={10} /> {a.city}, {a.state}</span>
-                          <span className="flex items-center gap-1"><Clock size={10} /> {a.years}</span>
-                          {a.availability && <span>· {a.availability}</span>}
-                        </div>
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {(a.credentials || []).slice(0, 3).map((cr, j) => <span key={j} style={{ fontSize: 10, padding: '2px 7px', background: c.lightBlue, color: c.primaryDark, borderRadius: 999, fontWeight: 600 }}>{cr}</span>)}
-                          {(a.credentials || []).length > 3 && <span style={{ fontSize: 10, color: c.textMuted, fontWeight: 600 }}>+{a.credentials.length - 3} more</span>}
-                        </div>
-                      </div>
-                      <ArrowRight size={16} color={c.textMuted} />
-                    </button>
-                  ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -3344,6 +3867,80 @@ function DetailBox({ label, children }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
       <div style={{ padding: 12, background: c.cream, borderRadius: 9 }}>{children}</div>
+    </div>
+  );
+}
+
+// ============================================================
+// Readiness Score Card — visible to workers (with full coaching
+// tips) and to owners viewing an applicant (compact, score only).
+// ============================================================
+function ReadinessScoreCard({ profile, history = {}, mode = 'worker' }) {
+  const score = calculateReadinessScore(profile, history);
+  const ringColor =
+    score.total >= 90 ? c.success :
+    score.total >= 70 ? c.primary :
+    score.total >= 50 ? c.gold :
+    c.coral;
+  const ringLabel =
+    score.total >= 90 ? 'Outstanding' :
+    score.total >= 70 ? 'Ready to Work' :
+    score.total >= 50 ? 'Building Up' :
+    'Getting Started';
+
+  return (
+    <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18 }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Professional Readiness Score</div>
+          <div className="flex items-baseline gap-2" style={{ marginTop: 4 }}>
+            <span style={{ fontSize: 38, fontWeight: 800, color: c.navy, letterSpacing: '-0.03em' }}>⭐ {score.total}%</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: ringColor }}>{ringLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ height: 10, background: c.borderSoft, borderRadius: 999, overflow: 'hidden', marginBottom: 14 }}>
+        <div style={{ height: '100%', width: `${score.total}%`, background: `linear-gradient(90deg, ${ringColor}, ${c.primary})`, transition: 'width 400ms ease' }} />
+      </div>
+
+      {/* Verification badges */}
+      {score.badges.length > 0 && (
+        <div className="flex flex-wrap gap-1.5" style={{ marginBottom: 14 }}>
+          {score.badges.map(b => (
+            <span key={b.key} style={{ background: c.paleBlue, color: c.primaryDark, fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Verified size={11} fill={c.gold} stroke={c.white} strokeWidth={2.5} /> {b.label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Breakdown — full in worker mode, hidden in owner compact mode */}
+      {mode === 'worker' && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>Score Breakdown</div>
+          <div className="space-y-2">
+            {score.breakdown.map((b, i) => (
+              <div key={i} style={{ background: c.cream, borderRadius: 9, padding: '9px 12px' }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: b.achieved ? 0 : 4 }}>
+                  <div className="flex items-center gap-2" style={{ flex: 1, minWidth: 0 }}>
+                    {b.achieved ? <CheckCircle2 size={14} color={c.success} /> : <Circle size={14} color={c.textMuted} />}
+                    <span style={{ fontSize: 13, fontWeight: 600, color: c.text }}>{b.label}</span>
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: b.achieved ? c.success : c.textMuted }}>{b.earned} / {b.max}</span>
+                </div>
+                {!b.achieved && (
+                  <div style={{ fontSize: 12, color: c.textMuted, marginLeft: 22, marginTop: 2, lineHeight: 1.4 }}>{b.tip}</div>
+                )}
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 11.5, color: c.textMuted, marginTop: 12, lineHeight: 1.5, fontStyle: 'italic' }}>
+            Daycare centers use your Professional Readiness Score and verification badges to identify reliable, qualified childcare professionals faster. Higher scores = more visibility and faster interview offers.
+          </p>
+        </>
+      )}
     </div>
   );
 }
