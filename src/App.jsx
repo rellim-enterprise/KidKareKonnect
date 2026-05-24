@@ -312,11 +312,21 @@ function calculateReadinessScore(profile, history = {}) {
 
   // Reputation-based — pulled from history when available, otherwise default.
   const responseRateScore = history.fastResponseRate ? Math.round(history.fastResponseRate * 10) : 0;
-  const reviewScore = history.positiveReviewRate ? Math.round(history.positiveReviewRate * 15) : 0;
   const completedShifts = history.completedShifts || 0;
   const completedShiftsScore = Math.min(10, Math.floor(completedShifts / 3) * 2);
   const noShows = history.noShows || 0;
   const noShowScore = noShows === 0 ? 5 : noShows === 1 ? 3 : 0;
+
+  // Three components that replace the (platform-dependent) Positive
+  // Employer Reviews slot. Each maxes out at 5 pts.
+  const refCount = (profile.references || []).length;
+  const refsScore = refCount >= 3 ? 5 : refCount === 2 ? 4 : refCount === 1 ? 2 : 0;
+
+  const certCount = (profile.trainingCertificates || []).length;
+  const certsScore = certCount >= 3 ? 5 : certCount === 2 ? 4 : certCount === 1 ? 2 : 0;
+
+  const idStatus = profile.identityStatus || 'none';
+  const idScore = idStatus === 'verified' ? 5 : idStatus === 'submitted' ? 2 : 0;
 
   const breakdown = [
     { label: 'Complete Profile', earned: profileComplete ? 10 : 0, max: 10, achieved: profileComplete, tip: 'Fill in your city, state, bio, education, availability, positions, and age groups.' },
@@ -324,7 +334,9 @@ function calculateReadinessScore(profile, history = {}) {
     { label: 'CPR Certification', earned: hasCpr ? 15 : 0, max: 15, achieved: hasCpr, tip: 'Add your CPR & First Aid card to your credentials.' },
     { label: 'CDA / Credentials', earned: hasCda ? 15 : (hasOtherCred ? 8 : 0), max: 15, achieved: hasCda, tip: 'Upload your CDA or higher childcare credential to boost your score.' },
     { label: 'Fast Response Time', earned: responseRateScore, max: 10, achieved: responseRateScore >= 8, tip: 'Respond to messages within 24 hours to keep your score high.' },
-    { label: 'Positive Employer Reviews', earned: reviewScore, max: 15, achieved: reviewScore >= 12, tip: 'Earn 5-star reviews from centers you work with.' },
+    { label: 'Professional References', earned: refsScore, max: 5, achieved: refsScore === 5, tip: 'Add 3 references (name, relationship, phone). Centers can contact them directly to verify your work history.' },
+    { label: 'Training Certificates', earned: certsScore, max: 5, achieved: certsScore === 5, tip: 'Upload your training certificates (GELDS, preservice, CEUs, etc.) — 3 or more for full credit.' },
+    { label: 'Verified Identity', earned: idScore, max: 5, achieved: idStatus === 'verified', tip: idStatus === 'submitted' ? 'Your ID is on file — our team will verify within 1 business day for full credit.' : 'Upload a government-issued ID. We confirm your identity to give centers extra peace of mind.' },
     { label: 'Completed Shifts / Jobs', earned: completedShiftsScore, max: 10, achieved: completedShiftsScore >= 8, tip: 'Complete shifts and finish jobs you accept to build your track record.' },
     { label: 'No No-Shows', earned: noShowScore, max: 5, achieved: noShowScore === 5, tip: 'Show up to every shift you commit to.' },
   ];
@@ -502,6 +514,9 @@ async function kkLoadApplicantsForJobs(jobIds) {
       resumeUrl: p.resume_url || '',
       credentialFiles: p.credential_filenames || [],
       credentialUrls: p.credential_urls || [],
+      references: p.professional_references || [],
+      trainingCertificates: p.training_certificates || [],
+      identityStatus: p.identity_status || 'none',
       appliedDate: formatRelativeTime(a.applied_at),
     });
   }
@@ -558,6 +573,8 @@ function profileStateToRow(profile) {
     credential_filenames: profile.credentialFiles || [],
     credential_urls: profile.credentialUrls || [],
     photo_url: profile.photo || null,
+    professional_references: profile.references || [],
+    training_certificates: profile.trainingCertificates || [],
   };
 }
 
@@ -581,6 +598,10 @@ function rowToProfileState(row, fallbackState) {
     resumeUrl: row.resume_url || '',
     credentialFiles: row.credential_filenames || [],
     credentialUrls: row.credential_urls || [],
+    references: row.professional_references || [],
+    trainingCertificates: row.training_certificates || [],
+    identityStatus: row.identity_status || 'none',
+    identityDocUrl: row.identity_doc_url || '',
   };
 }
 
@@ -1326,6 +1347,84 @@ export default function App() {
       alert(`Couldn't upload credential file: ${err.message}`);
     } finally {
       setUploading(u => ({ ...u, cred: false }));
+    }
+  };
+
+  // ----- Professional References -----
+  const addReference = () => {
+    const refs = profile.references || [];
+    if (refs.length >= 5) { alert('You can list up to 5 references.'); return; }
+    setProfile({ ...profile, references: [...refs, { name: '', relationship: '', phone: '', email: '' }] });
+  };
+  const updateReference = (idx, field, value) => {
+    const refs = [...(profile.references || [])];
+    refs[idx] = { ...refs[idx], [field]: value };
+    setProfile({ ...profile, references: refs });
+  };
+  const removeReference = (idx) => {
+    setProfile({ ...profile, references: (profile.references || []).filter((_, i) => i !== idx) });
+  };
+
+  // ----- Training Certificates -----
+  const handleTrainingCertUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(u => ({ ...u, cred: true }));
+    try {
+      const additions = [];
+      for (const f of files) {
+        if (f.size > 10 * 1024 * 1024) { alert(`${f.name} is too large (10MB limit)`); continue; }
+        const ext = (f.name.split('.').pop() || 'pdf').toLowerCase();
+        const safeName = f.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+        const publicUrl = await uploadToStorage(
+          `training/${Date.now()}-${safeName}`,
+          f,
+          f.type || 'application/pdf'
+        );
+        additions.push({ name: f.name.replace(/\.[^.]+$/, ''), hours: '', issued_at: '', file_url: publicUrl, file_name: f.name });
+      }
+      setProfile(p => ({ ...p, trainingCertificates: [...(p.trainingCertificates || []), ...additions] }));
+    } catch (err) {
+      alert(`Couldn't upload certificate: ${err.message}`);
+    } finally {
+      setUploading(u => ({ ...u, cred: false }));
+    }
+  };
+  const updateTrainingCert = (idx, field, value) => {
+    const certs = [...(profile.trainingCertificates || [])];
+    certs[idx] = { ...certs[idx], [field]: value };
+    setProfile({ ...profile, trainingCertificates: certs });
+  };
+  const removeTrainingCert = (idx) => {
+    setProfile({ ...profile, trainingCertificates: (profile.trainingCertificates || []).filter((_, i) => i !== idx) });
+  };
+
+  // ----- Verified Identity -----
+  const handleIdentityUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { alert('ID file must be under 10MB'); return; }
+    setUploading(u => ({ ...u, photo: true })); // reuse the photo spinner state
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not signed in');
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${user.id}/identity-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('id-docs')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (upErr) throw upErr;
+      const { error: dbErr } = await supabase
+        .from('profiles')
+        .update({ identity_status: 'submitted', identity_doc_url: path })
+        .eq('id', user.id);
+      if (dbErr) throw dbErr;
+      setProfile(p => ({ ...p, identityStatus: 'submitted', identityDocUrl: path }));
+      alert("Thanks! Your ID is on file. Our team verifies within 1 business day.");
+    } catch (err) {
+      alert(`Couldn't upload ID: ${err.message}`);
+    } finally {
+      setUploading(u => ({ ...u, photo: false }));
     }
   };
 
@@ -3399,8 +3498,107 @@ export default function App() {
               <ReadinessScoreCard profile={profile} history={myWorkerHistory || {}} mode="worker" />
             </div>
 
-            {/* Reviews from centers you've worked with */}
-            {myWorkerReviews.length > 0 && (
+            {/* References, Training Certificates, Verified Identity — the
+                three components that replace 'Positive Employer Reviews'
+                in the score, each worth 5 points for a total of 15. */}
+            <div className="grid lg:grid-cols-3 gap-3" style={{ marginBottom: 16 }}>
+              {/* Professional References */}
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Professional References</div>
+                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+5 score</span>
+                </div>
+                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Add up to 3 past employers or colleagues. Centers contact them off-platform.</p>
+                <div className="space-y-2">
+                  {(profile.references || []).map((r, i) => (
+                    <div key={i} style={{ background: c.cream, borderRadius: 8, padding: 9 }}>
+                      <input value={r.name} onChange={e => updateReference(i, 'name', e.target.value)} placeholder="Name" style={{ width: '100%', padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white, marginBottom: 4 }} />
+                      <input value={r.relationship} onChange={e => updateReference(i, 'relationship', e.target.value)} placeholder="Relationship (e.g., Center Director)" style={{ width: '100%', padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white, marginBottom: 4 }} />
+                      <input value={r.phone} onChange={e => updateReference(i, 'phone', e.target.value)} placeholder="Phone" style={{ width: '100%', padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white, marginBottom: 4 }} />
+                      <input value={r.email} onChange={e => updateReference(i, 'email', e.target.value)} placeholder="Email (optional)" style={{ width: '100%', padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white, marginBottom: 4 }} />
+                      <button onClick={() => removeReference(i)} style={{ fontSize: 11, color: c.coralDark, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>Remove</button>
+                    </div>
+                  ))}
+                  <button onClick={addReference} style={{ width: '100%', padding: '8px', background: c.paleBlue, color: c.primary, border: `1px dashed ${c.primary}`, borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                    <Plus size={12} /> Add Reference
+                  </button>
+                </div>
+              </div>
+
+              {/* Training Certificates */}
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training Certificates</div>
+                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+5 score</span>
+                </div>
+                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Upload GELDS, preservice, CEU, or any childcare training certificates you've earned.</p>
+                <div className="space-y-2">
+                  {(profile.trainingCertificates || []).map((cert, i) => (
+                    <div key={i} style={{ background: c.cream, borderRadius: 8, padding: 9 }}>
+                      <input value={cert.name} onChange={e => updateTrainingCert(i, 'name', e.target.value)} placeholder="Training name" style={{ width: '100%', padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white, marginBottom: 4 }} />
+                      <div className="flex gap-1.5" style={{ marginBottom: 4 }}>
+                        <input value={cert.hours} onChange={e => updateTrainingCert(i, 'hours', e.target.value)} placeholder="Hours" style={{ flex: 1, padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white }} />
+                        <input value={cert.issued_at} onChange={e => updateTrainingCert(i, 'issued_at', e.target.value)} placeholder="MM/YYYY" style={{ flex: 1, padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white }} />
+                      </div>
+                      <div className="flex items-center justify-between gap-2" style={{ fontSize: 11 }}>
+                        {cert.file_url ? <a href={cert.file_url} target="_blank" rel="noopener noreferrer" style={{ color: c.primary, fontWeight: 600 }}>View certificate</a> : <span style={{ color: c.textMuted }}>{cert.file_name || 'No file'}</span>}
+                        <button onClick={() => removeTrainingCert(i)} style={{ color: c.coralDark, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Remove</button>
+                      </div>
+                    </div>
+                  ))}
+                  <label style={{ display: 'block', cursor: 'pointer' }}>
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx" multiple onChange={handleTrainingCertUpload} style={{ display: 'none' }} />
+                    <div style={{ width: '100%', padding: '8px', background: c.paleBlue, color: c.primary, border: `1px dashed ${c.primary}`, borderRadius: 8, fontSize: 12, fontWeight: 700, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+                      <Upload size={12} /> {uploading.cred ? 'Uploading...' : 'Upload Certificate'}
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Verified Identity */}
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
+                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Verified Identity</div>
+                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+5 score</span>
+                </div>
+                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Upload a government-issued ID. We verify within 1 business day. Your document stays private and is only viewed by our verification team.</p>
+                {profile.identityStatus === 'verified' ? (
+                  <div style={{ background: '#EAF6EE', border: `1px solid ${c.success}`, borderRadius: 9, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Verified size={18} fill={c.success} stroke={c.white} strokeWidth={2.5} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Identity Verified</div>
+                      <div style={{ fontSize: 11.5, color: c.textMuted }}>Centers see this badge on your profile.</div>
+                    </div>
+                  </div>
+                ) : profile.identityStatus === 'submitted' ? (
+                  <div style={{ background: c.cream, border: `1px solid ${c.gold}`, borderRadius: 9, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Clock size={18} color={c.gold} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Pending Review</div>
+                      <div style={{ fontSize: 11.5, color: c.textMuted }}>Our team will verify within 1 business day.</div>
+                    </div>
+                  </div>
+                ) : profile.identityStatus === 'rejected' ? (
+                  <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, borderRadius: 9, padding: '12px 14px', marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: c.coralDark }}>Couldn't verify</div>
+                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 2 }}>Please upload a clearer photo of your ID below.</div>
+                  </div>
+                ) : null}
+                {profile.identityStatus !== 'verified' && profile.identityStatus !== 'submitted' && (
+                  <label style={{ display: 'block', cursor: 'pointer', marginTop: 10 }}>
+                    <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleIdentityUpload} style={{ display: 'none' }} />
+                    <div style={{ width: '100%', padding: '10px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                      <Upload size={13} /> Upload ID
+                    </div>
+                  </label>
+                )}
+              </div>
+            </div>
+
+            {/* Reviews from centers you've worked with — currently hidden
+                from the UI but the code is retained so it can be flipped
+                back on once cross-center reviewing becomes valuable. */}
+            {false && myWorkerReviews.length > 0 && (
               <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
                 <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 14 }}>
                   <div>
@@ -3683,6 +3881,9 @@ export default function App() {
                   resumeUrl: p.resume_url,
                   credentialFiles: p.credential_filenames || [],
                   credentialUrls: p.credential_urls || [],
+                  references: p.professional_references || [],
+                  trainingCertificates: p.training_certificates || [],
+                  identityStatus: p.identity_status || 'none',
                 };
                 const sc = calculateReadinessScore(candidateUi).total;
                 return (
@@ -3746,6 +3947,9 @@ export default function App() {
                   resumeUrl: p.resume_url,
                   credentialFiles: p.credential_filenames || [],
                   credentialUrls: p.credential_urls || [],
+                  references: p.professional_references || [],
+                  trainingCertificates: p.training_certificates || [],
+                  identityStatus: p.identity_status || 'none',
                 };
                 const isSaved = savedCandidateIds.includes(p.id);
                 return (
@@ -3865,6 +4069,60 @@ export default function App() {
                 </div>
               </DetailBox>
 
+              {/* Verified Identity badge */}
+              {viewingApplicantDetail.identityStatus === 'verified' && (
+                <div style={{ background: '#EAF6EE', border: `1px solid ${c.success}`, borderRadius: 11, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Verified size={18} fill={c.success} stroke={c.white} strokeWidth={2.5} />
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Identity Verified by Rellim Kid Kare Konnect</div>
+                </div>
+              )}
+
+              {/* Professional References */}
+              {(viewingApplicantDetail.references || []).length > 0 && (
+                <DetailBox label={`Professional References (${viewingApplicantDetail.references.length})`}>
+                  <div className="space-y-1.5">
+                    {viewingApplicantDetail.references.map((r, i) => (
+                      <div key={i} style={{ padding: 10, background: c.cream, borderRadius: 8 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy }}>{r.name || 'Reference'}</div>
+                        {r.relationship && <div style={{ fontSize: 12, color: c.textMuted }}>{r.relationship}</div>}
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1" style={{ fontSize: 12 }}>
+                          {r.phone && <a href={`tel:${r.phone}`} style={{ color: c.primary, textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Phone size={11} /> {r.phone}</a>}
+                          {r.email && <a href={`mailto:${r.email}`} style={{ color: c.primary, textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Mail size={11} /> {r.email}</a>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </DetailBox>
+              )}
+
+              {/* Training Certificates */}
+              {(viewingApplicantDetail.trainingCertificates || []).length > 0 && (
+                <DetailBox label={`Training Certificates (${viewingApplicantDetail.trainingCertificates.length})`}>
+                  <div className="space-y-1.5">
+                    {viewingApplicantDetail.trainingCertificates.map((cert, i) => (
+                      <a
+                        key={i}
+                        href={cert.file_url || '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => { if (!cert.file_url) e.preventDefault(); }}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 12px', background: c.paleBlue, borderRadius: 8, textDecoration: 'none', cursor: cert.file_url ? 'pointer' : 'default' }}
+                      >
+                        <div className="flex items-center gap-2" style={{ flex: 1, minWidth: 0 }}>
+                          <GraduationCap size={14} color={c.primary} />
+                          <div style={{ fontSize: 12.5, color: c.primaryDark, fontWeight: 600 }}>
+                            {cert.name || 'Training certificate'}
+                            {cert.hours && <span style={{ color: c.textMuted, fontWeight: 500 }}> · {cert.hours} hrs</span>}
+                            {cert.issued_at && <span style={{ color: c.textMuted, fontWeight: 500 }}> · {cert.issued_at}</span>}
+                          </div>
+                        </div>
+                        {cert.file_url && <span style={{ fontSize: 11, color: c.textMuted }}>Open</span>}
+                      </a>
+                    ))}
+                  </div>
+                </DetailBox>
+              )}
+
               {(viewingApplicantDetail.resume || viewingApplicantDetail.credentialFiles?.length > 0) && (
                 <DetailBox label="Documents">
                   <div className="space-y-1.5">
@@ -3973,7 +4231,7 @@ export default function App() {
                       <AlertCircle size={13} />
                       {viewingApplicantDetail.worker_outcome === 'no_show' ? 'No-Show Recorded' : 'Mark No-Show'}
                     </button>
-                    {viewingApplicantDetail.worker_outcome === 'completed' && (
+                    {false && viewingApplicantDetail.worker_outcome === 'completed' && (
                       <button
                         onClick={() => { setReviewDraft({ rating: 5, comment: '' }); setReviewError(''); setShowLeaveReview(true); }}
                         style={{ padding: '9px 14px', background: c.gold, color: c.navy, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
@@ -3985,8 +4243,9 @@ export default function App() {
                 </div>
               )}
 
-              {/* Reviews left by other centers about this teacher */}
-              {viewingApplicantReviews.length > 0 && (
+              {/* Reviews from other centers — currently hidden in the UI
+                  but kept in the code in case it gets turned back on. */}
+              {false && viewingApplicantReviews.length > 0 && (
                 <div style={{ marginTop: 14 }}>
                   <DetailBox label={`Reviews (${viewingApplicantReviews.length})`}>
                     <div className="space-y-2">
