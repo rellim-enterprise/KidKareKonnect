@@ -173,6 +173,51 @@ async function kkUpdateApplicationStatus(appId, newStatus) {
   return supabase.from('applications').update({ status: newStatus }).eq('id', appId);
 }
 
+// Fetches aggregate-only stats for a worker (completed shifts, no-shows,
+// response rate). Backed by the get_worker_history RPC which is a
+// SECURITY DEFINER function that returns ONLY counts — never message
+// content or individual application records — so it's safe to expose.
+async function kkLoadWorkerHistory(workerId) {
+  if (!workerId) return { data: null, error: null };
+  const { data, error } = await supabase.rpc('get_worker_history', {
+    worker_id_param: workerId,
+  });
+  if (error || !data || data.length === 0) return { data: null, error };
+  const row = data[0];
+  const totalReplies = row.total_replies || 0;
+  const fastReplies = row.fast_replies || 0;
+  return {
+    data: {
+      completedShifts: row.completed_shifts || 0,
+      noShows: row.no_shows || 0,
+      totalReplies,
+      fastReplies,
+      fastResponseRate: totalReplies > 0 ? fastReplies / totalReplies : 0,
+      // Positive review rate stays 0 until a reviews table exists.
+      positiveReviewRate: 0,
+    },
+    error: null,
+  };
+}
+
+async function kkUpdateApplicationOutcome(appId, outcome) {
+  return supabase.from('applications').update({ worker_outcome: outcome }).eq('id', appId);
+}
+
+// Count of jobs this owner has posted since the start of the current month
+// (UTC). Used to enforce the plan's monthlyJobLimit.
+async function kkGetCurrentMonthJobCount(ownerId) {
+  if (!ownerId) return 0;
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+  const { count } = await supabase
+    .from('jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('owner_id', ownerId)
+    .gte('posted_at', monthStart);
+  return count || 0;
+}
+
 async function kkLoadSavedCandidates(ownerId) {
   const { data, error } = await supabase
     .from('saved_candidates')
@@ -655,6 +700,9 @@ export default function App() {
   const [savedCandidatesFull, setSavedCandidatesFull] = useState([]);
   const [showTrustedNetwork, setShowTrustedNetwork] = useState(false);
   const [trustedNetworkFull, setTrustedNetworkFull] = useState([]);
+  const [viewingApplicantHistory, setViewingApplicantHistory] = useState(null);
+  const [myWorkerHistory, setMyWorkerHistory] = useState(null);
+  const [monthlyJobCount, setMonthlyJobCount] = useState(0);
   const [showSaveToast, setShowSaveToast] = useState(false);
   const [newJob, setNewJob] = useState({ title: '', location: '', type: 'Full Time', pay: '', description: '' });
   const [signup, setSignup] = useState({ name: '', email: '', phone: '', state: 'Georgia', center: '', password: '' });
@@ -1083,6 +1131,20 @@ export default function App() {
       alert('Please sign in again to post a job.');
       return;
     }
+    // Enforce monthly posting limit per plan. Premium and Elite plans
+    // have monthlyJobLimit=null which we treat as unlimited.
+    const planDetails = PRICING.find(p => p.name === plan);
+    const limit = planDetails ? planDetails.monthlyJobLimit : null;
+    if (limit !== null && limit !== undefined) {
+      const currentCount = await kkGetCurrentMonthJobCount(user.id);
+      if (currentCount >= limit) {
+        if (window.confirm(`You've used all ${limit} job posts on the ${plan} plan this month. Upgrade to Premium or Elite for unlimited posting?`)) {
+          setShowPost(false);
+          setView('pricing');
+        }
+        return;
+      }
+    }
     const payload = {
       owner_id: user.id,
       title: newJob.title,
@@ -1104,6 +1166,7 @@ export default function App() {
     const uiJob = jobRowToUiJob(row);
     setPosted([uiJob, ...posted]);
     setJobApplicants({ ...jobApplicants });
+    setMonthlyJobCount(c => c + 1);
     // Also surface this new job in the public browse list immediately
     setRealJobs([uiJob, ...realJobs]);
     setNewJob({ title: '', location: '', type: 'Full Time', pay: '', description: '' });
@@ -1256,6 +1319,69 @@ export default function App() {
   // MESSAGING — backed by Supabase. The UI keeps the same shape; we
   // reload after every write so unread flags + last-message ordering
   // come straight from the DB triggers.
+  // Fetch the viewed applicant's history (no-shows, completed shifts,
+  // response rate) so the Readiness Score uses real numbers, not zeros.
+  useEffect(() => {
+    if (!viewingApplicantDetail || !viewingApplicantDetail.userId) {
+      setViewingApplicantHistory(null);
+      return;
+    }
+    (async () => {
+      const { data } = await kkLoadWorkerHistory(viewingApplicantDetail.userId);
+      setViewingApplicantHistory(data);
+    })();
+  }, [viewingApplicantDetail?.userId]);
+
+  // Fetch the signed-in worker's own history so their My Profile score
+  // reflects their real reputation, not just their static profile data.
+  useEffect(() => {
+    if (!signedIn || userType !== 'worker') { setMyWorkerHistory(null); return; }
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await kkLoadWorkerHistory(user.id);
+      setMyWorkerHistory(data);
+    })();
+  }, [signedIn, userType, applied.length]);
+
+  // Refresh the owner's monthly job-post count any time their posted
+  // list changes (after a successful post, deletion, or first load).
+  useEffect(() => {
+    if (!signedIn || userType !== 'owner') { setMonthlyJobCount(0); return; }
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const count = await kkGetCurrentMonthJobCount(user.id);
+      setMonthlyJobCount(count);
+    })();
+  }, [signedIn, userType, posted.length]);
+
+  const updateApplicantOutcome = async (appId, workerId, outcome, jobId) => {
+    const { error } = await kkUpdateApplicationOutcome(appId, outcome);
+    if (error) {
+      alert(`Couldn't update: ${error.message}`);
+      return;
+    }
+    setJobApplicants(prev => {
+      const updated = { ...prev };
+      const arr = updated[jobId] ? [...updated[jobId]] : null;
+      if (arr) {
+        const idx = arr.findIndex(a => a.appId === appId);
+        if (idx !== -1) arr[idx] = { ...arr[idx], worker_outcome: outcome };
+        updated[jobId] = arr;
+      }
+      return updated;
+    });
+    if (viewingApplicantDetail && viewingApplicantDetail.appId === appId) {
+      setViewingApplicantDetail({ ...viewingApplicantDetail, worker_outcome: outcome });
+    }
+    // Refresh history so the score updates without a page reload
+    if (workerId) {
+      const { data } = await kkLoadWorkerHistory(workerId);
+      setViewingApplicantHistory(data);
+    }
+  };
+
   // Load full profile data for saved candidates when the modal opens.
   useEffect(() => {
     if (!showSavedCandidates) return;
@@ -1269,23 +1395,27 @@ export default function App() {
     })();
   }, [showSavedCandidates, savedCandidateIds]);
 
-  // Load Trusted Teacher Network — workers with profile_complete=true and
-  // bg_check=Portable. (For now this is the working definition; admin
-  // curation/invite-only flagging is a future feature.)
+  // Load Trusted Teacher Network — driven by the trusted_network flag
+  // on profiles. The flag is auto-curated by a DB trigger (criteria:
+  // complete profile, verified bg check, CPR + another credential,
+  // 2+ completed shifts, zero no-shows), and an admin can override
+  // either way via the Supabase dashboard.
   useEffect(() => {
     if (!showTrustedNetwork) return;
     (async () => {
       const { data } = await supabase
         .from('profiles')
         .select('*')
-        .eq('role', 'worker')
-        .eq('profile_complete', true)
+        .eq('trusted_network', true)
+        .order('updated_at', { ascending: false })
         .limit(50);
-      // Only include those with a strong readiness score
-      const ranked = (data || [])
-        .map(p => ({ profile: p, score: calculateReadinessScore(rowToProfileState(p)).total }))
-        .filter(x => x.score >= 70)
-        .sort((a, b) => b.score - a.score);
+      // Fetch each worker's history to compute the score for display
+      const ranked = await Promise.all((data || []).map(async (p) => {
+        const { data: hist } = await kkLoadWorkerHistory(p.id);
+        const score = calculateReadinessScore(rowToProfileState(p), hist || {}).total;
+        return { profile: p, score };
+      }));
+      ranked.sort((a, b) => b.score - a.score);
       setTrustedNetworkFull(ranked);
     })();
   }, [showTrustedNetwork]);
@@ -2783,7 +2913,17 @@ export default function App() {
                   {signedIn && userType === 'owner' ? 'My Job Posts' : signedIn && profileComplete ? `Jobs in ${profile.state}` : 'Browse Jobs'}
                 </h2>
                 <p style={{ color: c.textMuted, fontSize: 13 }}>
-                  {signedIn && userType === 'owner' ? `${posted.length} active${plan ? ` · ${plan} plan` : ''}` : `${visibleJobs.length} positions${signedIn && profileComplete && locationFilter === 'myArea' ? ` near ${profile.city || profile.state}` : ''}`}
+                  {(() => {
+                    if (signedIn && userType === 'owner') {
+                      const planDetails = PRICING.find(p => p.name === plan);
+                      const limit = planDetails ? planDetails.monthlyJobLimit : null;
+                      const limitText = limit === null || limit === undefined
+                        ? `${monthlyJobCount} posted this month · Unlimited`
+                        : `${monthlyJobCount} of ${limit} posts used this month`;
+                      return `${posted.length} active${plan ? ` · ${plan} plan · ${limitText}` : ''}`;
+                    }
+                    return `${visibleJobs.length} positions${signedIn && profileComplete && locationFilter === 'myArea' ? ` near ${profile.city || profile.state}` : ''}`;
+                  })()}
                 </p>
               </div>
               {signedIn && userType === 'owner' && (
@@ -3169,7 +3309,7 @@ export default function App() {
 
             {/* Professional Readiness Score */}
             <div style={{ marginBottom: 16 }}>
-              <ReadinessScoreCard profile={profile} mode="worker" />
+              <ReadinessScoreCard profile={profile} history={myWorkerHistory || {}} mode="worker" />
             </div>
 
             <div className="grid lg:grid-cols-3 gap-4">
@@ -3504,7 +3644,11 @@ export default function App() {
               {/* Readiness Score & verification badges — Pro+ feature */}
               {hasFeature(plan, 'readiness_score') ? (
                 <div style={{ marginBottom: 16 }}>
-                  <ReadinessScoreCard profile={viewingApplicantDetail} mode="owner" />
+                  <ReadinessScoreCard
+                    profile={viewingApplicantDetail}
+                    history={viewingApplicantHistory || {}}
+                    mode="owner"
+                  />
                 </div>
               ) : (
                 <div style={{ background: c.cream, border: `1px dashed ${c.border}`, borderRadius: 12, padding: 14, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -3612,8 +3756,66 @@ export default function App() {
                 }} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Mail size={13} /> Message</button>
                 <a href={`mailto:${viewingApplicantDetail.email}`} style={{ padding: '10px 18px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 13, fontWeight: 700, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}><Mail size={13} /> Email</a>
                 <a href={`tel:${viewingApplicantDetail.phone}`} style={{ padding: '10px 18px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 13, fontWeight: 700, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}><Phone size={13} /> Call</a>
-                <button style={{ padding: '10px 18px', background: c.gold, color: c.navy, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Heart size={13} /> Mark Interested</button>
+                <button
+                  onClick={() => toggleSaveCandidate(viewingApplicantDetail.userId)}
+                  style={{ padding: '10px 18px', background: savedCandidateIds.includes(viewingApplicantDetail.userId) ? c.coralDark : c.gold, color: savedCandidateIds.includes(viewingApplicantDetail.userId) ? c.white : c.navy, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Heart size={13} fill={savedCandidateIds.includes(viewingApplicantDetail.userId) ? c.white : 'transparent'} />
+                  {savedCandidateIds.includes(viewingApplicantDetail.userId) ? 'Saved' : 'Save Candidate'}
+                </button>
               </div>
+
+              {/* Hire-outcome actions appear once status is 'hired'. These
+                  feed the worker's no-show / completed-shifts history. */}
+              {viewingApplicantDetail.status === 'hired' && (
+                <div style={{ marginTop: 14, padding: 14, background: c.cream, borderRadius: 11, border: `1px dashed ${c.border}` }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>After the shift</div>
+                  <p style={{ fontSize: 12.5, color: c.text, marginBottom: 10, lineHeight: 1.5 }}>Tracking outcomes builds this teacher's reliability record across the network — boosting their score when they show up and protecting other centers when they don't.</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={() => updateApplicantOutcome(viewingApplicantDetail.appId, viewingApplicantDetail.userId, 'completed', viewingApplicantsFor.id)}
+                      disabled={viewingApplicantDetail.worker_outcome === 'completed'}
+                      style={{
+                        padding: '9px 14px',
+                        background: viewingApplicantDetail.worker_outcome === 'completed' ? c.success : c.white,
+                        color: viewingApplicantDetail.worker_outcome === 'completed' ? c.white : c.success,
+                        border: `1.5px solid ${c.success}`,
+                        borderRadius: 9,
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        cursor: viewingApplicantDetail.worker_outcome === 'completed' ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 6
+                      }}
+                    >
+                      <CheckCircle2 size={13} />
+                      {viewingApplicantDetail.worker_outcome === 'completed' ? 'Completed ✓' : 'Mark Shift Completed'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (viewingApplicantDetail.worker_outcome === 'no_show') return;
+                        if (window.confirm("Mark this teacher as a no-show? This affects their Readiness Score and reliability indicator.")) {
+                          updateApplicantOutcome(viewingApplicantDetail.appId, viewingApplicantDetail.userId, 'no_show', viewingApplicantsFor.id);
+                        }
+                      }}
+                      disabled={viewingApplicantDetail.worker_outcome === 'no_show'}
+                      style={{
+                        padding: '9px 14px',
+                        background: viewingApplicantDetail.worker_outcome === 'no_show' ? c.coralDark : c.white,
+                        color: viewingApplicantDetail.worker_outcome === 'no_show' ? c.white : c.coralDark,
+                        border: `1.5px solid ${c.coralDark}`,
+                        borderRadius: 9,
+                        fontSize: 12.5,
+                        fontWeight: 700,
+                        cursor: viewingApplicantDetail.worker_outcome === 'no_show' ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 6
+                      }}
+                    >
+                      <AlertCircle size={13} />
+                      {viewingApplicantDetail.worker_outcome === 'no_show' ? 'No-Show Recorded' : 'Mark No-Show'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             // LIST VIEW
