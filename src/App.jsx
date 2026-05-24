@@ -7,7 +7,7 @@ import {
   Clock, DollarSign, X, Plus, FileText, ExternalLink,
   LogOut, Bookmark, LayoutGrid, CheckCircle2, Lock, Verified,
   AlertCircle, Edit3, Upload, Paperclip, Handshake, Megaphone,
-  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff, Circle
+  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff, Circle, Star
 } from 'lucide-react';
 
 const c = {
@@ -186,6 +186,8 @@ async function kkLoadWorkerHistory(workerId) {
   const row = data[0];
   const totalReplies = row.total_replies || 0;
   const fastReplies = row.fast_replies || 0;
+  const totalReviews = row.total_reviews || 0;
+  const positiveReviews = row.positive_reviews || 0;
   return {
     data: {
       completedShifts: row.completed_shifts || 0,
@@ -193,9 +195,45 @@ async function kkLoadWorkerHistory(workerId) {
       totalReplies,
       fastReplies,
       fastResponseRate: totalReplies > 0 ? fastReplies / totalReplies : 0,
-      // Positive review rate stays 0 until a reviews table exists.
-      positiveReviewRate: 0,
+      totalReviews,
+      positiveReviews,
+      avgRating: parseFloat(row.avg_rating) || 0,
+      positiveReviewRate: totalReviews > 0 ? positiveReviews / totalReviews : 0,
     },
+    error: null,
+  };
+}
+
+async function kkInsertReview({ applicationId, workerId, ownerId, rating, comment }) {
+  return supabase.from('reviews').insert({
+    application_id: applicationId,
+    worker_id: workerId,
+    owner_id: ownerId,
+    rating,
+    comment: comment || null,
+  });
+}
+
+async function kkLoadReviewsForWorker(workerId) {
+  if (!workerId) return { data: [], error: null };
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('id, application_id, owner_id, rating, comment, created_at')
+    .eq('worker_id', workerId)
+    .order('created_at', { ascending: false });
+  if (error || !data) return { data: [], error };
+  const ownerIds = Array.from(new Set(data.map(r => r.owner_id)));
+  if (ownerIds.length === 0) return { data, error: null };
+  const { data: owners } = await supabase
+    .from('profiles')
+    .select('id, name, business_name, center')
+    .in('id', ownerIds);
+  const ownerMap = Object.fromEntries((owners || []).map(o => [o.id, o]));
+  return {
+    data: data.map(r => ({
+      ...r,
+      ownerName: (ownerMap[r.owner_id] && (ownerMap[r.owner_id].business_name || ownerMap[r.owner_id].center || ownerMap[r.owner_id].name)) || 'A center',
+    })),
     error: null,
   };
 }
@@ -701,8 +739,13 @@ export default function App() {
   const [showTrustedNetwork, setShowTrustedNetwork] = useState(false);
   const [trustedNetworkFull, setTrustedNetworkFull] = useState([]);
   const [viewingApplicantHistory, setViewingApplicantHistory] = useState(null);
+  const [viewingApplicantReviews, setViewingApplicantReviews] = useState([]);
   const [myWorkerHistory, setMyWorkerHistory] = useState(null);
+  const [myWorkerReviews, setMyWorkerReviews] = useState([]);
   const [monthlyJobCount, setMonthlyJobCount] = useState(0);
+  const [showLeaveReview, setShowLeaveReview] = useState(false);
+  const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
+  const [reviewError, setReviewError] = useState('');
   const [showSaveToast, setShowSaveToast] = useState(false);
   const [newJob, setNewJob] = useState({ title: '', location: '', type: 'Full Time', pay: '', description: '' });
   const [signup, setSignup] = useState({ name: '', email: '', phone: '', state: 'Georgia', center: '', password: '' });
@@ -1320,27 +1363,40 @@ export default function App() {
   // reload after every write so unread flags + last-message ordering
   // come straight from the DB triggers.
   // Fetch the viewed applicant's history (no-shows, completed shifts,
-  // response rate) so the Readiness Score uses real numbers, not zeros.
+  // response rate, reviews) so the Readiness Score uses real numbers.
   useEffect(() => {
     if (!viewingApplicantDetail || !viewingApplicantDetail.userId) {
       setViewingApplicantHistory(null);
+      setViewingApplicantReviews([]);
       return;
     }
     (async () => {
-      const { data } = await kkLoadWorkerHistory(viewingApplicantDetail.userId);
-      setViewingApplicantHistory(data);
+      const [{ data: hist }, { data: rev }] = await Promise.all([
+        kkLoadWorkerHistory(viewingApplicantDetail.userId),
+        kkLoadReviewsForWorker(viewingApplicantDetail.userId),
+      ]);
+      setViewingApplicantHistory(hist);
+      setViewingApplicantReviews(rev || []);
     })();
   }, [viewingApplicantDetail?.userId]);
 
-  // Fetch the signed-in worker's own history so their My Profile score
-  // reflects their real reputation, not just their static profile data.
+  // Fetch the signed-in worker's own history + reviews so their My
+  // Profile score reflects their real reputation, not just static data.
   useEffect(() => {
-    if (!signedIn || userType !== 'worker') { setMyWorkerHistory(null); return; }
+    if (!signedIn || userType !== 'worker') {
+      setMyWorkerHistory(null);
+      setMyWorkerReviews([]);
+      return;
+    }
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await kkLoadWorkerHistory(user.id);
-      setMyWorkerHistory(data);
+      const [{ data: hist }, { data: rev }] = await Promise.all([
+        kkLoadWorkerHistory(user.id),
+        kkLoadReviewsForWorker(user.id),
+      ]);
+      setMyWorkerHistory(hist);
+      setMyWorkerReviews(rev || []);
     })();
   }, [signedIn, userType, applied.length]);
 
@@ -1355,6 +1411,37 @@ export default function App() {
       setMonthlyJobCount(count);
     })();
   }, [signedIn, userType, posted.length]);
+
+  const submitReview = async () => {
+    setReviewError('');
+    if (!viewingApplicantDetail) return;
+    if (reviewDraft.rating < 1 || reviewDraft.rating > 5) {
+      setReviewError('Please pick a rating from 1 to 5 stars.');
+      return;
+    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setReviewError('Please sign in again.'); return; }
+    const { error } = await kkInsertReview({
+      applicationId: viewingApplicantDetail.appId,
+      workerId: viewingApplicantDetail.userId,
+      ownerId: user.id,
+      rating: reviewDraft.rating,
+      comment: reviewDraft.comment.trim(),
+    });
+    if (error) {
+      setReviewError(error.message);
+      return;
+    }
+    setShowLeaveReview(false);
+    setReviewDraft({ rating: 5, comment: '' });
+    // Refresh the viewed applicant's history + reviews
+    const [{ data: hist }, { data: rev }] = await Promise.all([
+      kkLoadWorkerHistory(viewingApplicantDetail.userId),
+      kkLoadReviewsForWorker(viewingApplicantDetail.userId),
+    ]);
+    setViewingApplicantHistory(hist);
+    setViewingApplicantReviews(rev || []);
+  };
 
   const updateApplicantOutcome = async (appId, workerId, outcome, jobId) => {
     const { error } = await kkUpdateApplicationOutcome(appId, outcome);
@@ -3312,6 +3399,37 @@ export default function App() {
               <ReadinessScoreCard profile={profile} history={myWorkerHistory || {}} mode="worker" />
             </div>
 
+            {/* Reviews from centers you've worked with */}
+            {myWorkerReviews.length > 0 && (
+              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+                <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Reviews from centers</div>
+                    <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
+                      {myWorkerHistory && myWorkerHistory.totalReviews > 0 && (
+                        <>
+                          <StarRating value={Math.round(myWorkerHistory.avgRating || 0)} size={18} interactive={false} />
+                          <span style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>{(myWorkerHistory.avgRating || 0).toFixed(1)}</span>
+                          <span style={{ fontSize: 12, color: c.textMuted }}>· {myWorkerHistory.totalReviews} review{myWorkerHistory.totalReviews === 1 ? '' : 's'}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {myWorkerReviews.slice(0, 5).map(r => (
+                    <div key={r.id} style={{ padding: 12, background: c.cream, borderRadius: 9 }}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap" style={{ marginBottom: 5 }}>
+                        <StarRating value={r.rating} size={14} interactive={false} />
+                        <span style={{ fontSize: 11, color: c.textMuted, fontWeight: 600 }}>{r.ownerName} · {formatRelativeTime(r.created_at)}</span>
+                      </div>
+                      {r.comment && <p style={{ fontSize: 12.5, color: c.text, lineHeight: 1.5, fontStyle: 'italic' }}>"{r.comment}"</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid lg:grid-cols-3 gap-4">
               {/* Profile preview card */}
               <div style={{ background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 14, padding: 22, textAlign: 'center', height: 'fit-content', position: 'sticky', top: 90 }}>
@@ -3487,6 +3605,48 @@ export default function App() {
       )}
 
       {/* APPLICANTS LIST + DETAIL */}
+      {/* Leave Review modal */}
+      {showLeaveReview && viewingApplicantDetail && (
+        <Modal onClose={() => setShowLeaveReview(false)}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Leave a Review</h3>
+            <button onClick={() => setShowLeaveReview(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+          <p style={{ fontSize: 13, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>
+            How was your experience working with <strong>{viewingApplicantDetail.name}</strong>? Your honest feedback helps other centers identify reliable teachers and helps great teachers stand out.
+          </p>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: c.text, marginBottom: 7 }}>Rating</label>
+            <StarRating
+              value={reviewDraft.rating}
+              size={28}
+              onChange={(n) => setReviewDraft({ ...reviewDraft, rating: n })}
+            />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: c.text, marginBottom: 7 }}>Comment (optional)</label>
+            <textarea
+              value={reviewDraft.comment}
+              onChange={e => setReviewDraft({ ...reviewDraft, comment: e.target.value })}
+              placeholder="What stood out? Reliability, attitude with children, communication..."
+              rows={4}
+              maxLength={500}
+              style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }}
+            />
+            <div style={{ fontSize: 11, color: c.textMuted, textAlign: 'right', marginTop: 4 }}>{reviewDraft.comment.length} / 500</div>
+          </div>
+          {reviewError && (
+            <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, color: c.coralDark, padding: '10px 13px', borderRadius: 8, fontSize: 13, marginBottom: 14, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />{reviewError}
+            </div>
+          )}
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowLeaveReview(false)} style={{ padding: '10px 18px', background: c.white, color: c.text, border: `1.5px solid ${c.border}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={submitReview} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Send size={13} /> Submit Review</button>
+          </div>
+        </Modal>
+      )}
+
       {/* Saved Candidates modal */}
       {showSavedCandidates && (
         <Modal onClose={() => setShowSavedCandidates(false)} wide>
@@ -3813,7 +3973,34 @@ export default function App() {
                       <AlertCircle size={13} />
                       {viewingApplicantDetail.worker_outcome === 'no_show' ? 'No-Show Recorded' : 'Mark No-Show'}
                     </button>
+                    {viewingApplicantDetail.worker_outcome === 'completed' && (
+                      <button
+                        onClick={() => { setReviewDraft({ rating: 5, comment: '' }); setReviewError(''); setShowLeaveReview(true); }}
+                        style={{ padding: '9px 14px', background: c.gold, color: c.navy, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <Star size={13} fill={c.navy} /> Leave Review
+                      </button>
+                    )}
                   </div>
+                </div>
+              )}
+
+              {/* Reviews left by other centers about this teacher */}
+              {viewingApplicantReviews.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <DetailBox label={`Reviews (${viewingApplicantReviews.length})`}>
+                    <div className="space-y-2">
+                      {viewingApplicantReviews.slice(0, 5).map(r => (
+                        <div key={r.id} style={{ padding: 10, background: c.cream, borderRadius: 9 }}>
+                          <div className="flex items-center justify-between gap-2 flex-wrap" style={{ marginBottom: 4 }}>
+                            <StarRating value={r.rating} size={14} interactive={false} />
+                            <span style={{ fontSize: 11, color: c.textMuted, fontWeight: 600 }}>{r.ownerName} · {formatRelativeTime(r.created_at)}</span>
+                          </div>
+                          {r.comment && <p style={{ fontSize: 12.5, color: c.text, lineHeight: 1.5, fontStyle: 'italic' }}>"{r.comment}"</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </DetailBox>
                 </div>
               )}
             </div>
@@ -4069,6 +4256,27 @@ function DetailBox({ label, children }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, color: c.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
       <div style={{ padding: 12, background: c.cream, borderRadius: 9 }}>{children}</div>
+    </div>
+  );
+}
+
+// Reusable star row. Used both for picking a rating (interactive) and
+// displaying one (read-only).
+function StarRating({ value, onChange, size = 18, interactive = true }) {
+  return (
+    <div style={{ display: 'inline-flex', gap: 3 }}>
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n}
+          type="button"
+          disabled={!interactive}
+          onClick={() => interactive && onChange && onChange(n)}
+          aria-label={`${n} star${n === 1 ? '' : 's'}`}
+          style={{ background: 'transparent', border: 'none', cursor: interactive ? 'pointer' : 'default', padding: 0, lineHeight: 0 }}
+        >
+          <Star size={size} color={n <= value ? c.gold : c.border} fill={n <= value ? c.gold : 'transparent'} strokeWidth={2} />
+        </button>
+      ))}
     </div>
   );
 }
