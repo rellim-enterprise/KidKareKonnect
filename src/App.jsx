@@ -2186,7 +2186,7 @@ export default function App() {
               <div className="relative">
                 <div className="flex items-center gap-3 mb-3">
                   <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Building2 size={22} color={c.gold} /></div>
-                  <div style={{ display: 'inline-block', fontSize: 10.5, padding: '3px 9px', background: c.gold, color: c.navy, borderRadius: 999, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>From $79 / month</div>
+                  <div style={{ display: 'inline-block', fontSize: 10.5, padding: '3px 9px', background: c.gold, color: c.navy, borderRadius: 999, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>From ${Math.min(...PRICING.map(p => p.price))} / month</div>
                 </div>
                 <h3 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 6 }}>I'm a Daycare Center</h3>
                 <p style={{ color: 'rgba(255,255,255,0.78)', fontSize: 14, lineHeight: 1.5, marginBottom: 14 }}>I own or manage a daycare. I want to post jobs and review applicant profiles.</p>
@@ -2281,7 +2281,7 @@ export default function App() {
             </button>
             <button onClick={() => beginSignup('owner')} style={{ background: `linear-gradient(135deg, ${c.primaryDark} 0%, ${c.navy} 100%)`, border: `2px solid ${c.primary}`, borderRadius: 16, padding: 22, textAlign: 'left', cursor: 'pointer', color: c.white }} className="hover:shadow-xl transition-shadow">
               <div style={{ width: 44, height: 44, borderRadius: 11, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}><Building2 size={19} color={c.gold} /></div>
-              <div style={{ display: 'inline-block', fontSize: 10, padding: '3px 8px', background: c.gold, color: c.navy, borderRadius: 999, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>From $79 / month</div>
+              <div style={{ display: 'inline-block', fontSize: 10, padding: '3px 8px', background: c.gold, color: c.navy, borderRadius: 999, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>From ${Math.min(...PRICING.map(p => p.price))} / month</div>
               <h3 style={{ fontSize: 17, fontWeight: 800, marginBottom: 4 }}>Daycare Center</h3>
               <p style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.8)', lineHeight: 1.5, marginBottom: 8 }}>I own or manage a daycare. Post jobs and review applicants.</p>
               <div style={{ color: c.gold, fontWeight: 700, fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 6 }}>Continue <ArrowRight size={12} /></div>
