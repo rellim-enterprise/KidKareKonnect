@@ -317,16 +317,14 @@ function calculateReadinessScore(profile, history = {}) {
   const noShows = history.noShows || 0;
   const noShowScore = noShows === 0 ? 5 : noShows === 1 ? 3 : 0;
 
-  // Three components that replace the (platform-dependent) Positive
-  // Employer Reviews slot. Each maxes out at 5 pts.
+  // Two components that replace the (platform-dependent) Positive
+  // Employer Reviews slot. References = 7, Training Certificates = 8,
+  // total 15 — preserving the original 100-point ceiling.
   const refCount = (profile.references || []).length;
-  const refsScore = refCount >= 3 ? 5 : refCount === 2 ? 4 : refCount === 1 ? 2 : 0;
+  const refsScore = refCount >= 3 ? 7 : refCount === 2 ? 5 : refCount === 1 ? 2 : 0;
 
   const certCount = (profile.trainingCertificates || []).length;
-  const certsScore = certCount >= 3 ? 5 : certCount === 2 ? 4 : certCount === 1 ? 2 : 0;
-
-  const idStatus = profile.identityStatus || 'none';
-  const idScore = idStatus === 'verified' ? 5 : idStatus === 'submitted' ? 2 : 0;
+  const certsScore = certCount >= 3 ? 8 : certCount === 2 ? 6 : certCount === 1 ? 3 : 0;
 
   const breakdown = [
     { label: 'Complete Profile', earned: profileComplete ? 10 : 0, max: 10, achieved: profileComplete, tip: 'Fill in your city, state, bio, education, availability, positions, and age groups.' },
@@ -334,9 +332,8 @@ function calculateReadinessScore(profile, history = {}) {
     { label: 'CPR Certification', earned: hasCpr ? 15 : 0, max: 15, achieved: hasCpr, tip: 'Add your CPR & First Aid card to your credentials.' },
     { label: 'CDA / Credentials', earned: hasCda ? 15 : (hasOtherCred ? 8 : 0), max: 15, achieved: hasCda, tip: 'Upload your CDA or higher childcare credential to boost your score.' },
     { label: 'Fast Response Time', earned: responseRateScore, max: 10, achieved: responseRateScore >= 8, tip: 'Respond to messages within 24 hours to keep your score high.' },
-    { label: 'Professional References', earned: refsScore, max: 5, achieved: refsScore === 5, tip: 'Add 3 references (name, relationship, phone). Centers can contact them directly to verify your work history.' },
-    { label: 'Training Certificates', earned: certsScore, max: 5, achieved: certsScore === 5, tip: 'Upload your training certificates (GELDS, preservice, CEUs, etc.) — 3 or more for full credit.' },
-    { label: 'Verified Identity', earned: idScore, max: 5, achieved: idStatus === 'verified', tip: idStatus === 'submitted' ? 'Your ID is on file — our team will verify within 1 business day for full credit.' : 'Upload a government-issued ID. We confirm your identity to give centers extra peace of mind.' },
+    { label: 'Professional References', earned: refsScore, max: 7, achieved: refsScore === 7, tip: 'Add 3 references (name, relationship, phone). Centers can contact them directly to verify your work history.' },
+    { label: 'Training Certificates', earned: certsScore, max: 8, achieved: certsScore === 8, tip: 'Upload your training certificates (GELDS, preservice, CEUs, etc.) — 3 or more for full credit.' },
     { label: 'Completed Shifts / Jobs', earned: completedShiftsScore, max: 10, achieved: completedShiftsScore >= 8, tip: 'Complete shifts and finish jobs you accept to build your track record.' },
     { label: 'No No-Shows', earned: noShowScore, max: 5, achieved: noShowScore === 5, tip: 'Show up to every shift you commit to.' },
   ];
@@ -516,7 +513,6 @@ async function kkLoadApplicantsForJobs(jobIds) {
       credentialUrls: p.credential_urls || [],
       references: p.professional_references || [],
       trainingCertificates: p.training_certificates || [],
-      identityStatus: p.identity_status || 'none',
       appliedDate: formatRelativeTime(a.applied_at),
     });
   }
@@ -575,6 +571,8 @@ function profileStateToRow(profile) {
     photo_url: profile.photo || null,
     professional_references: profile.references || [],
     training_certificates: profile.trainingCertificates || [],
+    // (identity_status / identity_doc_url removed — feature deprecated.
+    // See REMOVED-CODE comments in the React component for full removal.)
   };
 }
 
@@ -600,8 +598,6 @@ function rowToProfileState(row, fallbackState) {
     credentialUrls: row.credential_urls || [],
     references: row.professional_references || [],
     trainingCertificates: row.training_certificates || [],
-    identityStatus: row.identity_status || 'none',
-    identityDocUrl: row.identity_doc_url || '',
   };
 }
 
@@ -1397,35 +1393,6 @@ export default function App() {
   };
   const removeTrainingCert = (idx) => {
     setProfile({ ...profile, trainingCertificates: (profile.trainingCertificates || []).filter((_, i) => i !== idx) });
-  };
-
-  // ----- Verified Identity -----
-  const handleIdentityUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) { alert('ID file must be under 10MB'); return; }
-    setUploading(u => ({ ...u, photo: true })); // reuse the photo spinner state
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not signed in');
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-      const path = `${user.id}/identity-${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage
-        .from('id-docs')
-        .upload(path, file, { contentType: file.type, upsert: false });
-      if (upErr) throw upErr;
-      const { error: dbErr } = await supabase
-        .from('profiles')
-        .update({ identity_status: 'submitted', identity_doc_url: path })
-        .eq('id', user.id);
-      if (dbErr) throw dbErr;
-      setProfile(p => ({ ...p, identityStatus: 'submitted', identityDocUrl: path }));
-      alert("Thanks! Your ID is on file. Our team verifies within 1 business day.");
-    } catch (err) {
-      alert(`Couldn't upload ID: ${err.message}`);
-    } finally {
-      setUploading(u => ({ ...u, photo: false }));
-    }
   };
 
   const removeCredFile = (name) => {
@@ -3498,15 +3465,15 @@ export default function App() {
               <ReadinessScoreCard profile={profile} history={myWorkerHistory || {}} mode="worker" />
             </div>
 
-            {/* References, Training Certificates, Verified Identity — the
-                three components that replace 'Positive Employer Reviews'
-                in the score, each worth 5 points for a total of 15. */}
-            <div className="grid lg:grid-cols-3 gap-3" style={{ marginBottom: 16 }}>
+            {/* References + Training Certificates — the two components that
+                replace 'Positive Employer Reviews' in the score (15 pts
+                total: 7 + 8). Verified Identity was removed for privacy. */}
+            <div className="grid lg:grid-cols-2 gap-3" style={{ marginBottom: 16 }}>
               {/* Professional References */}
               <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
                 <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
                   <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Professional References</div>
-                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+5 score</span>
+                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+7 score</span>
                 </div>
                 <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Add up to 3 past employers or colleagues. Centers contact them off-platform.</p>
                 <div className="space-y-2">
@@ -3529,7 +3496,7 @@ export default function App() {
               <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
                 <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
                   <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training Certificates</div>
-                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+5 score</span>
+                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+8 score</span>
                 </div>
                 <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Upload GELDS, preservice, CEU, or any childcare training certificates you've earned.</p>
                 <div className="space-y-2">
@@ -3555,44 +3522,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Verified Identity */}
-              <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
-                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-                  <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Verified Identity</div>
-                  <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+5 score</span>
-                </div>
-                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Upload a government-issued ID. We verify within 1 business day. Your document stays private and is only viewed by our verification team.</p>
-                {profile.identityStatus === 'verified' ? (
-                  <div style={{ background: '#EAF6EE', border: `1px solid ${c.success}`, borderRadius: 9, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Verified size={18} fill={c.success} stroke={c.white} strokeWidth={2.5} />
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Identity Verified</div>
-                      <div style={{ fontSize: 11.5, color: c.textMuted }}>Centers see this badge on your profile.</div>
-                    </div>
-                  </div>
-                ) : profile.identityStatus === 'submitted' ? (
-                  <div style={{ background: c.cream, border: `1px solid ${c.gold}`, borderRadius: 9, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Clock size={18} color={c.gold} />
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Pending Review</div>
-                      <div style={{ fontSize: 11.5, color: c.textMuted }}>Our team will verify within 1 business day.</div>
-                    </div>
-                  </div>
-                ) : profile.identityStatus === 'rejected' ? (
-                  <div style={{ background: '#FEF2F2', border: `1px solid ${c.coral}`, borderRadius: 9, padding: '12px 14px', marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: c.coralDark }}>Couldn't verify</div>
-                    <div style={{ fontSize: 11.5, color: c.textMuted, marginTop: 2 }}>Please upload a clearer photo of your ID below.</div>
-                  </div>
-                ) : null}
-                {profile.identityStatus !== 'verified' && profile.identityStatus !== 'submitted' && (
-                  <label style={{ display: 'block', cursor: 'pointer', marginTop: 10 }}>
-                    <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleIdentityUpload} style={{ display: 'none' }} />
-                    <div style={{ width: '100%', padding: '10px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                      <Upload size={13} /> Upload ID
-                    </div>
-                  </label>
-                )}
-              </div>
             </div>
 
             {/* Reviews from centers you've worked with — currently hidden
@@ -3883,7 +3812,6 @@ export default function App() {
                   credentialUrls: p.credential_urls || [],
                   references: p.professional_references || [],
                   trainingCertificates: p.training_certificates || [],
-                  identityStatus: p.identity_status || 'none',
                 };
                 const sc = calculateReadinessScore(candidateUi).total;
                 return (
@@ -3949,7 +3877,6 @@ export default function App() {
                   credentialUrls: p.credential_urls || [],
                   references: p.professional_references || [],
                   trainingCertificates: p.training_certificates || [],
-                  identityStatus: p.identity_status || 'none',
                 };
                 const isSaved = savedCandidateIds.includes(p.id);
                 return (
@@ -4068,14 +3995,6 @@ export default function App() {
                   ))}
                 </div>
               </DetailBox>
-
-              {/* Verified Identity badge */}
-              {viewingApplicantDetail.identityStatus === 'verified' && (
-                <div style={{ background: '#EAF6EE', border: `1px solid ${c.success}`, borderRadius: 11, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Verified size={18} fill={c.success} stroke={c.white} strokeWidth={2.5} />
-                  <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>Identity Verified by Rellim Kid Kare Konnect</div>
-                </div>
-              )}
 
               {/* Professional References */}
               {(viewingApplicantDetail.references || []).length > 0 && (
