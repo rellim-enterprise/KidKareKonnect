@@ -16,3 +16,19 @@ export const SUPPORT_PHONE = '1-800-499-6349';
 // Auto-derived: strip everything that isn't a digit or +, so
 // `tel:` links work on iOS/Android dialers.
 export const SUPPORT_PHONE_TEL = `tel:${SUPPORT_PHONE.replace(/[^0-9+]/g, '')}`;
+
+// ============================================================
+// Stripe price IDs — one per subscription tier.
+// Set these in Vercel Project Settings → Environment Variables:
+//   VITE_STRIPE_PRICE_BASIC=price_xxx
+//   VITE_STRIPE_PRICE_PRO=price_xxx
+//   VITE_STRIPE_PRICE_PREMIUM=price_xxx
+//   VITE_STRIPE_PRICE_ELITE=price_xxx
+// (Find these in Stripe dashboard → Products → click each one)
+// ============================================================
+export const STRIPE_PRICE_IDS = {
+  'Konnect Basic':   (import.meta.env && import.meta.env.VITE_STRIPE_PRICE_BASIC)   || '',
+  'Konnect Pro':     (import.meta.env && import.meta.env.VITE_STRIPE_PRICE_PRO)     || '',
+  'Konnect Premium': (import.meta.env && import.meta.env.VITE_STRIPE_PRICE_PREMIUM) || '',
+  'Konnect Elite':   (import.meta.env && import.meta.env.VITE_STRIPE_PRICE_ELITE)   || '',
+};

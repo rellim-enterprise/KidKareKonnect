@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from './supabase';
-import { SUPPORT_PHONE, SUPPORT_PHONE_TEL } from './config';
+import { SUPPORT_PHONE, SUPPORT_PHONE_TEL, STRIPE_PRICE_IDS } from './config';
 import {
   Briefcase, GraduationCap, MapPin, Users, Search, Heart, Send,
   Check, Award, Shield, BookOpen, Building2, User, ArrowRight,
@@ -890,8 +890,15 @@ export default function App() {
               setJobApplicants(ownerData.jobApplicants || {});
             }
           }
-          const legacyPlan = await STORE.get(`kk_owner_${email}`);
-          if (legacyPlan && legacyPlan.plan) setPlan(legacyPlan.plan);
+          // Prefer the Stripe-backed subscription_plan column. Fall back to
+          // the legacy localStorage cache for users from before Stripe wiring.
+          if (profileRow?.subscription_plan && profileRow?.subscription_status &&
+              ['trialing', 'active'].includes(profileRow.subscription_status)) {
+            setPlan(profileRow.subscription_plan);
+          } else {
+            const legacyPlan = await STORE.get(`kk_owner_${email}`);
+            if (legacyPlan && legacyPlan.plan) setPlan(legacyPlan.plan);
+          }
         }
         if (role === 'worker') {
           const { data: apps } = await kkLoadWorkerApplications(session.user.id);
@@ -977,6 +984,33 @@ export default function App() {
       STORE.set(`kk_owner_${signup.email}`, { posted, jobApplicants, plan });
     }
   }, [posted, jobApplicants, plan, appLoaded, signedIn, signup.email, userType]);
+
+  // After returning from Stripe Checkout, refresh the profile so the
+  // new subscription_plan / subscription_status shows up immediately
+  // (rather than waiting for the next page load).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const subStatus = url.searchParams.get('subscription');
+    if (!subStatus) return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: row } = await kkLoadProfile(user.id);
+        if (row && row.subscription_plan && ['trialing', 'active'].includes(row.subscription_status)) {
+          setPlan(row.subscription_plan);
+        }
+      }
+      if (subStatus === 'success') {
+        alert("You're all set! Your 7-day free trial has started. You won't be charged until the trial ends — and you can cancel anytime.");
+      } else if (subStatus === 'canceled') {
+        alert("Checkout canceled. No charges were made. You can start your trial anytime from the Pricing page.");
+      }
+      // Clear the query param from the URL so the alert doesn't fire twice on refresh
+      url.searchParams.delete('subscription');
+      window.history.replaceState({}, '', url.toString());
+    })();
+  }, []);
 
   // Brand context for the Crisp chat widget (business name, support
   // email, support phone). Runs once on mount so every visitor — signed
@@ -2537,8 +2571,13 @@ export default function App() {
             setJobApplicants(ownerData.jobApplicants || {});
           }
         }
-        const legacyPlan = await STORE.get(`kk_owner_${user.email}`);
-        if (legacyPlan && legacyPlan.plan) setPlan(legacyPlan.plan);
+        if (profileRow?.subscription_plan && profileRow?.subscription_status &&
+            ['trialing', 'active'].includes(profileRow.subscription_status)) {
+          setPlan(profileRow.subscription_plan);
+        } else {
+          const legacyPlan = await STORE.get(`kk_owner_${user.email}`);
+          if (legacyPlan && legacyPlan.plan) setPlan(legacyPlan.plan);
+        }
       }
       if (role === 'worker') {
         const { data: apps } = await kkLoadWorkerApplications(user.id);
@@ -2975,14 +3014,94 @@ export default function App() {
       );
     }
     const choosePlan = async (planName) => {
-      if (signedIn && userType === 'owner') {
-        setPlan(planName);
-        await STORE.set('kk_auth', { signedIn: true, userType, profileComplete, plan: planName });
-        setView('app');
-      } else {
-        setPlan(planName);
+      // If they aren't signed in yet, send them through signup first.
+      // We stash the chosen plan in localStorage so the pricing page can
+      // auto-launch Stripe Checkout once they're signed in as an owner.
+      // We DO NOT set plan locally — plan is only "real" once Stripe's
+      // webhook updates subscription_plan in Supabase.
+      if (!signedIn || userType !== 'owner') {
+        await STORE.set('kk_pending_plan', planName);
         setUserType('owner');
         setView('signup');
+        return;
+      }
+      // Signed-in owner: kick off Stripe Checkout.
+      const priceId = STRIPE_PRICE_IDS[planName];
+      if (!priceId) {
+        alert(`Billing isn't configured for ${planName} yet. Stripe price IDs are missing — see VITE_STRIPE_PRICE_* env vars in Vercel.`);
+        return;
+      }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { alert('Please sign in again.'); return; }
+        const baseUrl = window.location.origin;
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL || 'https://vennbviwdmcyhcmwdncd.supabase.co'}/functions/v1/create-checkout-session`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              planName,
+              priceId,
+              successUrl: `${baseUrl}/?subscription=success`,
+              cancelUrl: `${baseUrl}/?subscription=canceled`,
+            }),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok || !data.url) {
+          alert(`Could not start checkout: ${data.error || 'unknown error'}`);
+          return;
+        }
+        window.location.href = data.url;
+      } catch (err) {
+        alert(`Could not start checkout: ${err.message}`);
+      }
+    };
+
+    // Auto-launch Stripe Checkout when a guest-clicked plan finishes signup.
+    // The pricing page is the post-signup landing spot for owners, so we
+    // check kk_pending_plan once and kick off checkout immediately.
+    useEffect(() => {
+      if (!signedIn || userType !== 'owner') return;
+      let canceled = false;
+      (async () => {
+        const pending = await STORE.get('kk_pending_plan');
+        if (canceled || !pending || plan) return;
+        await STORE.set('kk_pending_plan', null);
+        choosePlan(pending);
+      })();
+      return () => { canceled = true; };
+    }, [signedIn, userType, plan]);
+
+    // Send an owner to the Stripe Customer Portal so they can manage
+    // their subscription (cancel, change plan, update card).
+    const openCustomerPortal = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { alert('Please sign in again.'); return; }
+        const res = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL || 'https://vennbviwdmcyhcmwdncd.supabase.co'}/functions/v1/create-portal-session`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ returnUrl: window.location.origin }),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok || !data.url) {
+          alert(`Could not open billing portal: ${data.error || 'unknown error'}`);
+          return;
+        }
+        window.location.href = data.url;
+      } catch (err) {
+        alert(`Could not open billing portal: ${err.message}`);
       }
     };
     return (
@@ -2997,6 +3116,17 @@ export default function App() {
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginTop: 14, padding: '6px 14px', background: c.success, color: c.white, borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: '0.05em' }}>
               <CheckCircle2 size={13} /> 7-DAY FREE TRIAL · NO CHARGE TODAY
             </div>
+            {signedIn && userType === 'owner' && plan && (
+              <div style={{ marginTop: 16 }}>
+                <button
+                  onClick={openCustomerPortal}
+                  style={{ padding: '10px 18px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  Manage Subscription <ArrowRight size={13} />
+                </button>
+                <div style={{ marginTop: 6, fontSize: 12, color: c.textMuted }}>You're on <strong>{plan}</strong> · update card, change plan, or cancel anytime</div>
+              </div>
+            )}
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-6xl mx-auto" style={{ alignItems: 'stretch' }}>
             {PRICING.map((t, i) => (
