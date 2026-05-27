@@ -1001,6 +1001,52 @@ export default function App() {
     }
   }, [posted, jobApplicants, plan, appLoaded, signedIn, signup.email, userType]);
 
+  // After a guest picks a plan + signs up + verifies email, they land on
+  // the pricing view. If kk_pending_plan is set, auto-launch Stripe
+  // Checkout for that plan so the chosen-from-the-welcome-page flow feels
+  // continuous. Lives at the top level so React's hook order stays
+  // consistent across view changes.
+  useEffect(() => {
+    if (view !== 'pricing' || !signedIn || userType !== 'owner' || plan) return;
+    let canceled = false;
+    (async () => {
+      const pending = await STORE.get('kk_pending_plan');
+      if (canceled || !pending) return;
+      const priceId = STRIPE_PRICE_IDS[pending];
+      if (!priceId) {
+        // Price IDs not configured yet — leave them on the pricing page
+        // so they can click manually once env vars are in place.
+        await STORE.set('kk_pending_plan', null);
+        return;
+      }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        await STORE.set('kk_pending_plan', null);
+        const baseUrl = window.location.origin;
+        const res = await fetch(
+          `${(import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://vennbviwdmcyhcmwdncd.supabase.co'}/functions/v1/create-checkout-session`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({
+              planName: pending,
+              priceId,
+              successUrl: `${baseUrl}/?subscription=success`,
+              cancelUrl: `${baseUrl}/?subscription=canceled`,
+            }),
+          }
+        );
+        const data = await res.json();
+        if (res.ok && data.url) window.location.href = data.url;
+      } catch (_) { /* swallow — they can click the button manually */ }
+    })();
+    return () => { canceled = true; };
+  }, [view, signedIn, userType, plan]);
+
   // After returning from Stripe Checkout, refresh the profile so the
   // new subscription_plan / subscription_status shows up immediately
   // (rather than waiting for the next page load).
@@ -3113,20 +3159,10 @@ export default function App() {
       }
     };
 
-    // Auto-launch Stripe Checkout when a guest-clicked plan finishes signup.
-    // The pricing page is the post-signup landing spot for owners, so we
-    // check kk_pending_plan once and kick off checkout immediately.
-    useEffect(() => {
-      if (!signedIn || userType !== 'owner') return;
-      let canceled = false;
-      (async () => {
-        const pending = await STORE.get('kk_pending_plan');
-        if (canceled || !pending || plan) return;
-        await STORE.set('kk_pending_plan', null);
-        choosePlan(pending);
-      })();
-      return () => { canceled = true; };
-    }, [signedIn, userType, plan]);
+    // (Auto-launch Stripe Checkout from kk_pending_plan is handled by a
+    // top-level useEffect at the App scope — see the effect above that
+    // depends on [view, signedIn, userType, plan]. Hooks can't live
+    // inside a conditional view block.)
 
     // Send an owner to the Stripe Customer Portal so they can manage
     // their subscription (cancel, change plan, update card).
