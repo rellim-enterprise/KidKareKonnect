@@ -771,6 +771,9 @@ export default function App() {
   const [savedCandidatesFull, setSavedCandidatesFull] = useState([]);
   const [showTrustedNetwork, setShowTrustedNetwork] = useState(false);
   const [trustedNetworkFull, setTrustedNetworkFull] = useState([]);
+  // The tab a guest tapped before signing up — drives the friendly
+  // sign-up explainer modal. Null when no gate is open.
+  const [gatedTab, setGatedTab] = useState(null);
   const [viewingApplicantHistory, setViewingApplicantHistory] = useState(null);
   const [viewingApplicantReviews, setViewingApplicantReviews] = useState([]);
   const [myWorkerHistory, setMyWorkerHistory] = useState(null);
@@ -1854,7 +1857,7 @@ export default function App() {
           <button onClick={() => setView(signedIn ? 'app' : 'welcome')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><Logo /></button>
           <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
             {tabs.map(t => (
-              <button key={t.id} onClick={() => { if (!signedIn) { setView('roleChoice'); return; } setView('app'); setTab(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 8, background: view === 'app' && tab === t.id ? c.paleBlue : 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.text, fontSize: 13, fontWeight: view === 'app' && tab === t.id ? 700 : 500, border: 'none', cursor: 'pointer', position: 'relative' }}>
+              <button key={t.id} onClick={() => { if (!signedIn) { setGatedTab(t); return; } setView('app'); setTab(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 8, background: view === 'app' && tab === t.id ? c.paleBlue : 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.text, fontSize: 13, fontWeight: view === 'app' && tab === t.id ? 700 : 500, border: 'none', cursor: 'pointer', position: 'relative' }}>
                 <t.icon size={14} />{t.label}
                 {t.badge > 0 && <span style={{ background: c.coral, color: c.white, fontSize: 9.5, fontWeight: 700, padding: '1px 6px', borderRadius: 999, marginLeft: 2 }}>{t.badge}</span>}
               </button>
@@ -1880,7 +1883,7 @@ export default function App() {
         <div className="md:hidden relative" style={{ borderTop: `1px solid ${c.border}` }}>
           <div className="flex overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             {tabs.map(t => (
-              <button key={t.id} onClick={() => { if (!signedIn) { setView('roleChoice'); return; } setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
+              <button key={t.id} onClick={() => { if (!signedIn) { setGatedTab(t); return; } setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
                 <div style={{ position: 'relative' }}>
                   <t.icon size={16} />
                   {t.badge > 0 && <span style={{ position: 'absolute', top: -4, right: -8, background: c.coral, color: c.white, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, minWidth: 14, textAlign: 'center' }}>{t.badge}</span>}
@@ -3904,6 +3907,61 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* SIGN-UP REQUIRED — friendly explainer when a guest taps a gated tab */}
+      {gatedTab && (() => {
+        const messages = {
+          jobs:      { headline: 'Sign up to browse open positions', body: 'Create a free Teacher account to see every childcare job posted across Georgia, save the ones you like, and apply with one click.', recommend: 'worker' },
+          templates: { headline: 'Sign up to post jobs with templates', body: 'Create a Daycare Center account to start hiring. We offer ready-made templates so you can post a position in under two minutes.', recommend: 'owner' },
+          training:  { headline: 'Sign up to access the Training Hub', body: 'Create a free account to explore credential paths, GELDS-aligned training, and Georgia DECAL renewal information.', recommend: 'worker' },
+          licensing: { headline: 'Sign up to view State Licensing details', body: 'Create a free account to access Georgia DECAL licensing requirements, background-check steps, and credential renewal timelines.', recommend: 'worker' },
+          partners:  { headline: 'Sign up to browse Partners', body: 'Create a free account to view trusted training providers, consultants, and centers across Georgia.', recommend: 'worker' },
+          profile:   { headline: 'Sign up to build your profile', body: 'Create a free Teacher account to build your childcare professional profile and let Georgia centers find you.', recommend: 'worker' },
+          messages:  { headline: 'Sign up to start messaging', body: 'Create a free account so you can message daycare centers about positions and respond to interview requests.', recommend: 'worker' },
+        };
+        const msg = messages[gatedTab.id] || { headline: `Sign up to access ${gatedTab.label || ''}`, body: 'Create a free account to use this feature.', recommend: 'worker' };
+        const TabIcon = gatedTab.icon || Verified;
+        return (
+          <Modal onClose={() => setGatedTab(null)}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+              <div className="flex items-center gap-3">
+                <div style={{ width: 42, height: 42, borderRadius: 11, background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <TabIcon size={20} color={c.primary} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: c.primary, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{gatedTab.label}</div>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy, letterSpacing: '-0.015em' }}>{msg.headline}</h3>
+                </div>
+              </div>
+              <button onClick={() => setGatedTab(null)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+            </div>
+            <p style={{ fontSize: 13.5, color: c.textMuted, lineHeight: 1.6, marginBottom: 18 }}>{msg.body}</p>
+            <div className="grid sm:grid-cols-2 gap-2" style={{ marginBottom: 14 }}>
+              <button
+                onClick={() => { setGatedTab(null); setUserType('worker'); setView('signup'); }}
+                style={{ padding: '12px 14px', background: msg.recommend === 'worker' ? c.primary : c.white, color: msg.recommend === 'worker' ? c.white : c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                I'm a Teacher
+              </button>
+              <button
+                onClick={() => { setGatedTab(null); setUserType('owner'); setView('signup'); }}
+                style={{ padding: '12px 14px', background: msg.recommend === 'owner' ? c.primary : c.white, color: msg.recommend === 'owner' ? c.white : c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                I'm a Daycare Center
+              </button>
+            </div>
+            <div style={{ textAlign: 'center', fontSize: 12.5, color: c.textMuted }}>
+              Already have an account?{' '}
+              <button
+                onClick={() => { setGatedTab(null); setView('login'); }}
+                style={{ background: 'none', border: 'none', color: c.primary, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+              >
+                Log in
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* POST JOB */}
       {showPost && (
