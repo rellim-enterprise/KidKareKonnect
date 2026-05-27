@@ -19,16 +19,32 @@ const c = {
   success: '#5B8C6E'
 };
 
-const STATES = ['Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming'];
+// While we focus on Georgia (Atlanta metro and surrounding areas) we lock
+// the state dropdowns to Georgia only. To expand to additional states later,
+// uncomment the others below — the rest of the app (state licensing pages,
+// filtering, etc.) already knows how to handle multiple states.
+const STATES = [
+  'Georgia',
+  // 'Alabama','Alaska','Arizona','Arkansas','California','Colorado',
+  // 'Connecticut','Delaware','Florida','Hawaii','Idaho','Illinois','Indiana',
+  // 'Iowa','Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts',
+  // 'Michigan','Minnesota','Mississippi','Missouri','Montana','Nebraska',
+  // 'Nevada','New Hampshire','New Jersey','New Mexico','New York','North Carolina',
+  // 'North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island',
+  // 'South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont',
+  // 'Virginia','Washington','West Virginia','Wisconsin','Wyoming',
+];
 
+// Demo jobs shown alongside real centers' postings. All Georgia for now;
+// expand the list when we open additional states.
 const SAMPLE_JOBS = [
   { id: 1, title: 'Lead Toddler Teacher', center: 'Ahead of the Class Early Learning', verified: true, location: 'Lithonia, GA', state: 'Georgia', type: 'Full Time', pay: '$16 to $19 / hr', posted: '2 days ago', tags: ['CDA Preferred', 'Health Insurance'], description: 'Loving, experienced teacher needed for our toddler classroom.' },
   { id: 2, title: 'Infant Caregiver', center: 'Little Leaders Academy of Arts', verified: true, location: 'Conyers, GA', state: 'Georgia', type: 'Full Time', pay: '$14 to $16 / hr', posted: '3 days ago', tags: ['Entry Level Welcome', 'Training'], description: 'Warm hearted caregiver to join our infant room.' },
   { id: 3, title: 'Preschool Assistant', center: 'Milestones Achievers Academy', verified: true, location: 'Lithonia, GA', state: 'Georgia', type: 'Part Time', pay: '$13 to $15 / hr', posted: '5 days ago', tags: ['Flexible Hours'], description: 'Afternoon shift assistant for our preschool team.' },
   { id: 4, title: 'Center Director', center: 'Sunshine Kids Learning Center', verified: true, location: 'Atlanta, GA', state: 'Georgia', type: 'Full Time', pay: '$48,000 to $58,000 / yr', posted: '1 week ago', tags: ['Director Credential'], description: 'Seeking experienced director with GA Director Credential.' },
-  { id: 5, title: 'Lead Pre K Teacher', center: 'Bright Beginnings Academy', verified: true, location: 'Charlotte, NC', state: 'North Carolina', type: 'Full Time', pay: '$17 to $20 / hr', posted: '4 days ago', tags: ['NC ECC Credential'], description: 'Pre K teacher with NC Early Childhood Credential or AAS in ECE.' },
   { id: 6, title: 'Lead Infant Teacher', center: 'Tender Hearts Academy', verified: true, location: 'Decatur, GA', state: 'Georgia', type: 'Full Time', pay: '$15 to $18 / hr', posted: '1 day ago', tags: ['CDA Preferred'], description: 'Lead infant teacher needed. CDA or willingness to obtain within 1 year.' },
-  { id: 7, title: 'Floater Teacher', center: 'Tiny Treasures Daycare', verified: false, location: 'Tampa, FL', state: 'Florida', type: 'Part Time', pay: '$13 to $15 / hr', posted: '6 days ago', tags: ['Flexible'], description: 'On call floater needed across multiple classrooms.' }
+  { id: 8, title: 'Assistant Teacher (Preschool)', center: 'Bright Futures Childcare', verified: true, location: 'Stone Mountain, GA', state: 'Georgia', type: 'Full Time', pay: '$14 to $17 / hr', posted: '1 day ago', tags: ['CDA Preferred', 'GELDS Trained'], description: 'Support our preschool lead with circle time, art, and family communication.' },
+  { id: 9, title: 'After School Care Specialist', center: 'Kidz Klub Atlanta', verified: true, location: 'Atlanta, GA', state: 'Georgia', type: 'Part Time', pay: '$13 to $15 / hr', posted: '4 days ago', tags: ['After School', 'Flexible Schedule'], description: 'Plan engaging activities for K to 5th graders 2pm to 6pm weekdays.' },
 ];
 
 const STATE_LICENSING = {
@@ -2162,14 +2178,14 @@ export default function App() {
               <div className="text-center md:text-left">
                 <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-5" style={{ background: c.white, border: `1px solid ${c.border}`, color: c.primary, fontSize: 12.5, fontWeight: 600 }}>
                   <Verified size={13} fill={c.gold} stroke={c.white} strokeWidth={2.5} />
-                  The Premier Daycare Hiring Platform
+                  Built for Georgia Childcare
                 </div>
                 <h1 style={{ fontSize: 'clamp(32px, 5.5vw, 56px)', fontWeight: 800, color: c.navy, lineHeight: 1.05, letterSpacing: '-0.035em', marginBottom: 16 }}>
                   Where Great<br/>
                   <span style={{ background: 'linear-gradient(135deg, #2B5F7E 0%, #FF8C42 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Childcare Begins</span>
                 </h1>
                 <p style={{ fontSize: 16.5, color: c.textMuted, lineHeight: 1.6, marginBottom: 6, maxWidth: 520 }}>
-                  Connecting qualified daycare workers with licensed centers through industry specific matching and trusted training partners.
+                  Connecting Georgia daycare centers with qualified, credentialed childcare professionals — built around DECAL licensing, GELDS training, and the real way childcare hiring works.
                 </p>
               </div>
               <div className="relative">
@@ -2244,15 +2260,50 @@ export default function App() {
           </p>
         </section>
 
+        {/* WHY WE'RE NOT INDEED — childcare-specific differentiation */}
         <section style={{ background: c.white, borderTop: `1px solid ${c.border}` }}>
-          <div className="max-w-6xl mx-auto px-6 py-7">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[{v:'2,400+',l:'Active Jobs'},{v:'850+',l:'Centers Hiring'},{v:'12,000+',l:'Verified Educators'},{v:'All 50',l:'States'}].map((s,i) => (
-                <div key={i} className="text-center">
-                  <div style={{ fontSize: 24, fontWeight: 800, color: c.primary, letterSpacing: '-0.025em', marginBottom: 3 }}>{s.v}</div>
-                  <div style={{ fontSize: 10.5, color: c.textMuted, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{s.l}</div>
+          <div className="max-w-6xl mx-auto px-6 py-14">
+            <div className="text-center" style={{ marginBottom: 32 }}>
+              <div style={{ fontSize: 12, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>Why Rellim Kid Kare Konnect</div>
+              <h2 style={{ fontSize: 'clamp(24px, 4vw, 32px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 10 }}>This isn't Indeed. This is childcare.</h2>
+              <p style={{ fontSize: 15, color: c.textMuted, maxWidth: 620, margin: '0 auto', lineHeight: 1.6 }}>
+                General job boards weren't designed for hiring teachers who care for infants and toddlers. We were. Every feature is built around how Georgia daycares actually hire — and how qualified caregivers actually find work.
+              </p>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <Heart size={18} fill={c.primary} color={c.primary} />
                 </div>
-              ))}
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Childcare only, by design</h3>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Every job is a Georgia daycare position. No retail, no restaurants, no "open to candidates outside this role." Centers find serious applicants; teachers find serious centers.</p>
+              </div>
+              <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#FFF1DD', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <Award size={18} color="#FF8C42" />
+                </div>
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>DECAL-aligned from day one</h3>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Profiles map directly to Georgia DECAL credentials — CDA, Director Credential, State Preservice, GELDS-informed training. Centers see what each candidate is licensed to do at a glance.</p>
+              </div>
+              <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#EAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <Verified size={18} color={c.success} fill={c.success} />
+                </div>
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Verified, portable background checks</h3>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Every applicant's background check status is on their profile, including portable checks that let qualified teachers start work right away — instead of waiting weeks for a duplicate screening.</p>
+              </div>
+              <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                  <Star size={18} color={c.gold} fill={c.gold} />
+                </div>
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Reliability you can see</h3>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Professional Readiness Score, completed shifts, no-shows, and employer references — visible on every profile. No more guessing whether a "great resume" actually shows up.</p>
+              </div>
+            </div>
+            <div className="text-center" style={{ marginTop: 28 }}>
+              <p style={{ fontSize: 13, color: c.textMuted, fontStyle: 'italic' }}>
+                Currently serving Atlanta metro and across Georgia. <strong style={{ color: c.navy, fontStyle: 'normal' }}>One state at a time, done right.</strong>
+              </p>
             </div>
           </div>
         </section>
