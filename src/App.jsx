@@ -2260,14 +2260,14 @@ export default function App() {
           </p>
         </section>
 
-        {/* WHY WE'RE NOT INDEED — childcare-specific differentiation */}
+        {/* PURPOSE-BUILT — Georgia childcare positioning, on its own merits */}
         <section style={{ background: c.white, borderTop: `1px solid ${c.border}` }}>
           <div className="max-w-6xl mx-auto px-6 py-14">
             <div className="text-center" style={{ marginBottom: 32 }}>
               <div style={{ fontSize: 12, color: c.primary, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 8 }}>Why Rellim Kid Kare Konnect</div>
-              <h2 style={{ fontSize: 'clamp(24px, 4vw, 32px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 10 }}>This isn't Indeed. This is childcare.</h2>
+              <h2 style={{ fontSize: 'clamp(24px, 4vw, 32px)', fontWeight: 800, color: c.navy, letterSpacing: '-0.025em', marginBottom: 10 }}>Purpose-built for Georgia childcare.</h2>
               <p style={{ fontSize: 15, color: c.textMuted, maxWidth: 620, margin: '0 auto', lineHeight: 1.6 }}>
-                General job boards weren't designed for hiring teachers who care for infants and toddlers. We were. Every feature is built around how Georgia daycares actually hire — and how qualified caregivers actually find work.
+                A hiring and networking platform designed specifically for the people who care for Georgia's youngest learners. Every feature reflects how childcare centers actually hire and how qualified educators actually grow their careers.
               </p>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2275,14 +2275,14 @@ export default function App() {
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                   <Heart size={18} fill={c.primary} color={c.primary} />
                 </div>
-                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Childcare only, by design</h3>
-                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Every job is a Georgia daycare position. No retail, no restaurants, no "open to candidates outside this role." Centers find serious applicants; teachers find serious centers.</p>
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Focused on childcare</h3>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Every job, every applicant, every credential is built around early childhood education. Centers find serious applicants. Teachers find centers that value their craft.</p>
               </div>
               <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: '#FFF1DD', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                   <Award size={18} color="#FF8C42" />
                 </div>
-                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>DECAL-aligned from day one</h3>
+                <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Aligned with DECAL</h3>
                 <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Profiles map directly to Georgia DECAL credentials — CDA, Director Credential, State Preservice, GELDS-informed training. Centers see what each candidate is licensed to do at a glance.</p>
               </div>
               <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
@@ -2290,19 +2290,19 @@ export default function App() {
                   <Verified size={18} color={c.success} fill={c.success} />
                 </div>
                 <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Verified, portable background checks</h3>
-                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Every applicant's background check status is on their profile, including portable checks that let qualified teachers start work right away — instead of waiting weeks for a duplicate screening.</p>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Background check status is displayed on every profile, including portable checks that let qualified teachers start work right away rather than waiting weeks for a duplicate screening.</p>
               </div>
               <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
                   <Star size={18} color={c.gold} fill={c.gold} />
                 </div>
                 <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 6, letterSpacing: '-0.01em' }}>Reliability you can see</h3>
-                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Professional Readiness Score, completed shifts, no-shows, and employer references — visible on every profile. No more guessing whether a "great resume" actually shows up.</p>
+                <p style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.55 }}>Professional Readiness Score, completed shifts, attendance history, and employer references — all visible on every profile so centers can hire with confidence.</p>
               </div>
             </div>
             <div className="text-center" style={{ marginTop: 28 }}>
               <p style={{ fontSize: 13, color: c.textMuted, fontStyle: 'italic' }}>
-                Currently serving Atlanta metro and across Georgia. <strong style={{ color: c.navy, fontStyle: 'normal' }}>One state at a time, done right.</strong>
+                Currently serving Atlanta metro and across Georgia. <strong style={{ color: c.navy, fontStyle: 'normal' }}>Built carefully, one community at a time.</strong>
               </p>
             </div>
           </div>
