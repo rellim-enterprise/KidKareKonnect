@@ -1852,6 +1852,7 @@ export default function App() {
   const Header = () => {
     const tabs = buildTabs();
     return (
+      <>
       <header style={{ background: c.white, borderBottom: `1px solid ${c.border}`, position: 'sticky', top: 0, zIndex: 50 }}>
         <div className="max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between gap-2" style={{ minHeight: 68 }}>
           <button onClick={() => setView(signedIn ? 'app' : 'welcome')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><Logo /></button>
@@ -1895,6 +1896,63 @@ export default function App() {
           <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, background: `linear-gradient(to left, ${c.white}, rgba(255,255,255,0))`, pointerEvents: 'none' }} />
         </div>
       </header>
+
+      {/* SIGN-UP REQUIRED — friendly explainer when a guest taps a gated tab.
+          Lives inside Header so it renders no matter which view (welcome,
+          roleChoice, login, pricing, app) is currently showing. */}
+      {gatedTab && (() => {
+        const messages = {
+          jobs:      { headline: 'Sign up to browse open positions', body: 'Create a free Teacher account to see every childcare job posted across Georgia, save the ones you like, and apply with one click.', recommend: 'worker' },
+          templates: { headline: 'Sign up to post jobs with templates', body: 'Create a Daycare Center account to start hiring. We offer ready-made templates so you can post a position in under two minutes.', recommend: 'owner' },
+          training:  { headline: 'Sign up to access the Training Hub', body: 'Create a free account to explore credential paths, GELDS-aligned training, and Georgia DECAL renewal information.', recommend: 'worker' },
+          licensing: { headline: 'Sign up to view State Licensing details', body: 'Create a free account to access Georgia DECAL licensing requirements, background-check steps, and credential renewal timelines.', recommend: 'worker' },
+          partners:  { headline: 'Sign up to browse Partners', body: 'Create a free account to view trusted training providers, consultants, and centers across Georgia.', recommend: 'worker' },
+          profile:   { headline: 'Sign up to build your profile', body: 'Create a free Teacher account to build your childcare professional profile and let Georgia centers find you.', recommend: 'worker' },
+          messages:  { headline: 'Sign up to start messaging', body: 'Create a free account so you can message daycare centers about positions and respond to interview requests.', recommend: 'worker' },
+        };
+        const msg = messages[gatedTab.id] || { headline: `Sign up to access ${gatedTab.label || ''}`, body: 'Create a free account to use this feature.', recommend: 'worker' };
+        const TabIcon = gatedTab.icon || Verified;
+        return (
+          <Modal onClose={() => setGatedTab(null)}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+              <div className="flex items-center gap-3">
+                <div style={{ width: 42, height: 42, borderRadius: 11, background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <TabIcon size={20} color={c.primary} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: c.primary, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{gatedTab.label}</div>
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy, letterSpacing: '-0.015em' }}>{msg.headline}</h3>
+                </div>
+              </div>
+            </div>
+            <p style={{ fontSize: 13.5, color: c.textMuted, lineHeight: 1.6, marginBottom: 18 }}>{msg.body}</p>
+            <div className="grid sm:grid-cols-2 gap-2" style={{ marginBottom: 14 }}>
+              <button
+                onClick={() => { setGatedTab(null); setUserType('worker'); setView('signup'); }}
+                style={{ padding: '12px 14px', background: msg.recommend === 'worker' ? c.primary : c.white, color: msg.recommend === 'worker' ? c.white : c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                I'm a Teacher
+              </button>
+              <button
+                onClick={() => { setGatedTab(null); setUserType('owner'); setView('signup'); }}
+                style={{ padding: '12px 14px', background: msg.recommend === 'owner' ? c.primary : c.white, color: msg.recommend === 'owner' ? c.white : c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              >
+                I'm a Daycare Center
+              </button>
+            </div>
+            <div style={{ textAlign: 'center', fontSize: 12.5, color: c.textMuted }}>
+              Already have an account?{' '}
+              <button
+                onClick={() => { setGatedTab(null); setView('login'); }}
+                style={{ background: 'none', border: 'none', color: c.primary, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+              >
+                Log in
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+      </>
     );
   };
 
@@ -3907,61 +3965,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* SIGN-UP REQUIRED — friendly explainer when a guest taps a gated tab */}
-      {gatedTab && (() => {
-        const messages = {
-          jobs:      { headline: 'Sign up to browse open positions', body: 'Create a free Teacher account to see every childcare job posted across Georgia, save the ones you like, and apply with one click.', recommend: 'worker' },
-          templates: { headline: 'Sign up to post jobs with templates', body: 'Create a Daycare Center account to start hiring. We offer ready-made templates so you can post a position in under two minutes.', recommend: 'owner' },
-          training:  { headline: 'Sign up to access the Training Hub', body: 'Create a free account to explore credential paths, GELDS-aligned training, and Georgia DECAL renewal information.', recommend: 'worker' },
-          licensing: { headline: 'Sign up to view State Licensing details', body: 'Create a free account to access Georgia DECAL licensing requirements, background-check steps, and credential renewal timelines.', recommend: 'worker' },
-          partners:  { headline: 'Sign up to browse Partners', body: 'Create a free account to view trusted training providers, consultants, and centers across Georgia.', recommend: 'worker' },
-          profile:   { headline: 'Sign up to build your profile', body: 'Create a free Teacher account to build your childcare professional profile and let Georgia centers find you.', recommend: 'worker' },
-          messages:  { headline: 'Sign up to start messaging', body: 'Create a free account so you can message daycare centers about positions and respond to interview requests.', recommend: 'worker' },
-        };
-        const msg = messages[gatedTab.id] || { headline: `Sign up to access ${gatedTab.label || ''}`, body: 'Create a free account to use this feature.', recommend: 'worker' };
-        const TabIcon = gatedTab.icon || Verified;
-        return (
-          <Modal onClose={() => setGatedTab(null)}>
-            <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
-              <div className="flex items-center gap-3">
-                <div style={{ width: 42, height: 42, borderRadius: 11, background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <TabIcon size={20} color={c.primary} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: c.primary, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{gatedTab.label}</div>
-                  <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy, letterSpacing: '-0.015em' }}>{msg.headline}</h3>
-                </div>
-              </div>
-              <button onClick={() => setGatedTab(null)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
-            </div>
-            <p style={{ fontSize: 13.5, color: c.textMuted, lineHeight: 1.6, marginBottom: 18 }}>{msg.body}</p>
-            <div className="grid sm:grid-cols-2 gap-2" style={{ marginBottom: 14 }}>
-              <button
-                onClick={() => { setGatedTab(null); setUserType('worker'); setView('signup'); }}
-                style={{ padding: '12px 14px', background: msg.recommend === 'worker' ? c.primary : c.white, color: msg.recommend === 'worker' ? c.white : c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              >
-                I'm a Teacher
-              </button>
-              <button
-                onClick={() => { setGatedTab(null); setUserType('owner'); setView('signup'); }}
-                style={{ padding: '12px 14px', background: msg.recommend === 'owner' ? c.primary : c.white, color: msg.recommend === 'owner' ? c.white : c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              >
-                I'm a Daycare Center
-              </button>
-            </div>
-            <div style={{ textAlign: 'center', fontSize: 12.5, color: c.textMuted }}>
-              Already have an account?{' '}
-              <button
-                onClick={() => { setGatedTab(null); setView('login'); }}
-                style={{ background: 'none', border: 'none', color: c.primary, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
-              >
-                Log in
-              </button>
-            </div>
-          </Modal>
-        );
-      })()}
 
       {/* POST JOB */}
       {showPost && (
