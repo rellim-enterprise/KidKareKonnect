@@ -220,19 +220,21 @@ async function kkLoadWorkerHistory(workerId) {
   };
 }
 
-// ===================== SUPER ADMIN =====================
+// ===================== ADMIN / SUPER ADMIN =====================
 async function kkAdminLoadOverview() {
-  const [profiles, jobs, subs, apps] = await Promise.all([
-    supabase.from('profiles').select('id, name, email, role, center, business_name, city, state, trusted_network, is_super_admin, profile_complete, created_at').order('created_at', { ascending: false }),
-    supabase.from('jobs').select('id, title, center, owner_id, active, posted_at').order('posted_at', { ascending: false }),
-    supabase.from('sub_requests').select('id, status').order('created_at', { ascending: false }),
-    supabase.from('applications').select('id'),
+  const [profiles, jobs, subs, apps, offers] = await Promise.all([
+    supabase.from('profiles').select('id, name, email, role, phone, center, business_name, city, state, zip, trusted_network, admin_level, profile_complete, years_experience, bg_check, subscription_plan, category, created_at').order('created_at', { ascending: false }),
+    supabase.from('jobs').select('id, title, center, owner_id, location, pay, type, active, posted_at').order('posted_at', { ascending: false }),
+    supabase.from('sub_requests').select('id, center_name, shift_date, shift_dates, age_group, pay_rate, status, created_at').order('created_at', { ascending: false }),
+    supabase.from('applications').select('id, job_id, worker_id, status, applied_at').order('applied_at', { ascending: false }),
+    supabase.from('sub_offers').select('id, sub_request_id, teacher_id, status'),
   ]);
   return {
     profiles: profiles.data || [],
     jobs: jobs.data || [],
     subs: subs.data || [],
     applications: apps.data || [],
+    offers: offers.data || [],
   };
 }
 async function kkAdminSetTrusted(userId, value) {
@@ -241,8 +243,15 @@ async function kkAdminSetTrusted(userId, value) {
 async function kkAdminSetJobActive(jobId, value) {
   return supabase.from('jobs').update({ active: value }).eq('id', jobId);
 }
-async function kkAdminSetSuperAdmin(userId, value) {
-  return supabase.from('profiles').update({ is_super_admin: value }).eq('id', userId);
+async function kkAdminSetAdminLevel(userId, level) {
+  return supabase.from('profiles').update({ admin_level: level, is_super_admin: level === 'super_admin' }).eq('id', userId);
+}
+async function kkLoadAdminConfig() {
+  const { data } = await supabase.from('admin_config').select('admin_allowed_sections').eq('id', 1).maybeSingle();
+  return data?.admin_allowed_sections || ['centers','jobs','applications','partners','sub_requests','trusted_teachers','sub_shifts','teachers'];
+}
+async function kkSaveAdminConfig(sections) {
+  return supabase.from('admin_config').update({ admin_allowed_sections: sections, updated_at: new Date().toISOString() }).eq('id', 1);
 }
 
 // ===================== SUBSTITUTE STAFFING =====================
@@ -895,10 +904,17 @@ export default function App() {
   const [myOfferRequestIds, setMyOfferRequestIds] = useState([]);
   const [availableForSub, setAvailableForSub] = useState(false);
   const [subSchedule, setSubSchedule] = useState({ days: [], from: '', until: '', note: '' });
-  // Super admin
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  // Admin / Super admin
+  const [adminLevel, setAdminLevel] = useState('none'); // none | admin | super_admin
   const [adminData, setAdminData] = useState(null);
   const [adminUserSearch, setAdminUserSearch] = useState('');
+  const [adminSection, setAdminSection] = useState(null); // null = dashboard; else a section key
+  const [adminAllowedSections, setAdminAllowedSections] = useState(['centers','jobs','applications','partners','sub_requests','trusted_teachers','sub_shifts','teachers']);
+  const [showRolePerms, setShowRolePerms] = useState(false);
+  const [impersonatingRole, setImpersonatingRole] = useState(null);
+  const realUserTypeRef = useRef(null);
+  const isSuperAdmin = adminLevel === 'super_admin';
+  const isAdmin = adminLevel === 'admin' || adminLevel === 'super_admin';
   const [showSubRequest, setShowSubRequest] = useState(false);
   const [editingSubId, setEditingSubId] = useState(null);
   const [subForm, setSubForm] = useState({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
@@ -1106,7 +1122,7 @@ export default function App() {
   // follows the user across devices. Only fires for workers with a live
   // session — owners and partners don't have these fields populated.
   useEffect(() => {
-    if (!appLoaded || !signedIn || userType !== 'worker') return;
+    if (!appLoaded || !signedIn || userType !== 'worker' || impersonatingRole) return;
     const handle = setTimeout(async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -1114,7 +1130,7 @@ export default function App() {
       await supabase.from('profiles').update(row).eq('id', user.id);
     }, 800);
     return () => clearTimeout(handle);
-  }, [profile, appLoaded, signedIn, userType]);
+  }, [profile, appLoaded, signedIn, userType, impersonatingRole]);
 
   useEffect(() => {
     if (appLoaded) STORE.set('kk_signup', signup);
@@ -1727,21 +1743,26 @@ export default function App() {
     })();
   }, [signedIn, userType, posted.length]);
 
-  // Detect super-admin status on sign-in so the Admin tab can appear.
+  // Detect admin level on sign-in so the Admin tab can appear.
   useEffect(() => {
-    if (!signedIn) { setIsSuperAdmin(false); return; }
+    if (!signedIn) { setAdminLevel('none'); return; }
     (async () => {
-      const { data } = await supabase.rpc('is_super_admin');
-      setIsSuperAdmin(!!data);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from('profiles').select('admin_level').eq('id', user.id).maybeSingle();
+      setAdminLevel(data?.admin_level || 'none');
+      if (data?.admin_level && data.admin_level !== 'none') {
+        setAdminAllowedSections(await kkLoadAdminConfig());
+      }
     })();
   }, [signedIn]);
 
   // Load platform-wide data when an admin opens the Admin tab.
   useEffect(() => {
-    if (signedIn && isSuperAdmin && tab === 'admin') {
+    if (signedIn && isAdmin && tab === 'admin') {
       kkAdminLoadOverview().then(setAdminData);
     }
-  }, [signedIn, isSuperAdmin, tab]);
+  }, [signedIn, isAdmin, tab]);
 
   const adminToggleTrusted = async (userId, value) => {
     await kkAdminSetTrusted(userId, value);
@@ -1751,10 +1772,36 @@ export default function App() {
     await kkAdminSetJobActive(jobId, value);
     setAdminData(d => d ? { ...d, jobs: d.jobs.map(j => j.id === jobId ? { ...j, active: value } : j) } : d);
   };
-  const adminToggleSuperAdmin = async (userId, value) => {
-    if (!window.confirm(value ? 'Grant super-admin access to this user?' : 'Remove super-admin access from this user?')) return;
-    await kkAdminSetSuperAdmin(userId, value);
-    setAdminData(d => d ? { ...d, profiles: d.profiles.map(p => p.id === userId ? { ...p, is_super_admin: value } : p) } : d);
+  const adminSetLevel = async (userId, level) => {
+    const labels = { none: 'remove all admin access from', admin: 'make an Admin', super_admin: 'make a Super Admin' };
+    if (!window.confirm(`Are you sure you want to ${labels[level]} this user?`)) return;
+    await kkAdminSetAdminLevel(userId, level);
+    setAdminData(d => d ? { ...d, profiles: d.profiles.map(p => p.id === userId ? { ...p, admin_level: level } : p) } : d);
+  };
+  const saveRolePerms = async () => {
+    await kkSaveAdminConfig(adminAllowedSections);
+    setShowRolePerms(false);
+    setShowSaveToast(true);
+    setTimeout(() => setShowSaveToast(false), 2500);
+  };
+  const toggleAllowedSection = (key) => {
+    setAdminAllowedSections(s => s.includes(key) ? s.filter(x => x !== key) : [...s, key]);
+  };
+
+  // Role impersonation — admins preview the app as another role.
+  const startImpersonate = (role) => {
+    if (!impersonatingRole) realUserTypeRef.current = userType;
+    setImpersonatingRole(role);
+    setUserType(role);
+    setAdminSection(null);
+    setTab('jobs');
+    setView('app');
+  };
+  const exitImpersonate = () => {
+    setUserType(realUserTypeRef.current);
+    setImpersonatingRole(null);
+    setTab('admin');
+    setView('app');
   };
 
   // Load the owner's center profile (address, quality rated, hours) so
@@ -2247,7 +2294,7 @@ export default function App() {
     if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'messages', label: 'Messages', icon: Mail, badge: myUnreadCount });
     if (signedIn && userType === 'worker' && profileComplete) base.push({ id: 'myProfile', label: 'My Profile', icon: User });
     if (signedIn && userType === 'owner') base.push({ id: 'myCenter', label: 'My Center', icon: Building2 });
-    if (signedIn && isSuperAdmin) base.push({ id: 'admin', label: 'Admin', icon: Shield });
+    if (signedIn && isAdmin && !impersonatingRole) base.push({ id: 'admin', label: 'Admin', icon: Shield });
     return base;
   };
 
@@ -2298,6 +2345,14 @@ export default function App() {
           <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, background: `linear-gradient(to left, ${c.white}, rgba(255,255,255,0))`, pointerEvents: 'none' }} />
         </div>
       </header>
+
+      {/* IMPERSONATION BANNER — shown while an admin previews another role */}
+      {impersonatingRole && (
+        <div style={{ background: c.gold, color: c.navy, padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13, fontWeight: 700, position: 'sticky', top: 68, zIndex: 49 }}>
+          <Eye size={15} /> Previewing as {impersonatingRole === 'worker' ? 'Teacher' : impersonatingRole === 'owner' ? 'Director' : 'Partner'}
+          <button onClick={exitImpersonate} style={{ background: c.navy, color: c.white, border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Exit preview</button>
+        </div>
+      )}
 
       {/* SIGN-UP REQUIRED — friendly explainer when a guest taps a gated tab.
           Lives inside Header so it renders no matter which view (welcome,
@@ -4177,94 +4232,129 @@ export default function App() {
         )}
 
         {/* MY PROFILE - workers can edit their saved profile */}
-        {tab === 'admin' && signedIn && isSuperAdmin && (
+        {tab === 'admin' && signedIn && isAdmin && (() => {
+          const allSections = [
+            { key: 'teachers',         label: 'Teachers',         type: 'profiles', rows: (adminData?.profiles || []).filter(p => p.role === 'worker') },
+            { key: 'centers',          label: 'Centers',          type: 'profiles', rows: (adminData?.profiles || []).filter(p => p.role === 'owner') },
+            { key: 'jobs',             label: 'Jobs Posted',      type: 'jobs',     rows: (adminData?.jobs || []) },
+            { key: 'applications',     label: 'Applications',     type: 'applications', rows: (adminData?.applications || []) },
+            { key: 'partners',         label: 'Partners',         type: 'profiles', rows: (adminData?.profiles || []).filter(p => p.role === 'partner') },
+            { key: 'sub_requests',     label: 'Sub Requests',     type: 'subs',     rows: (adminData?.subs || []) },
+            { key: 'trusted_teachers', label: 'Trusted Teachers', type: 'profiles', rows: (adminData?.profiles || []).filter(p => p.role === 'worker' && p.trusted_network) },
+            { key: 'sub_shifts',       label: 'Open Sub Shifts',  type: 'subs',     rows: (adminData?.subs || []).filter(s => s.status === 'open') },
+          ];
+          const visibleSections = isSuperAdmin ? allSections : allSections.filter(s => adminAllowedSections.includes(s.key));
+          const profById = Object.fromEntries((adminData?.profiles || []).map(p => [p.id, p]));
+          const jobById = Object.fromEntries((adminData?.jobs || []).map(j => [j.id, j]));
+          const current = adminSection ? visibleSections.find(s => s.key === adminSection) : null;
+          return (
           <div>
-            <div className="mb-4">
-              <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 8 }}><Shield size={20} color={c.primary} /> Admin</h2>
-              <p style={{ color: c.textMuted, fontSize: 13 }}>Platform overview and management. Visible to super admins only.</p>
+            <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+              <div>
+                <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 8 }}><Shield size={20} color={c.primary} /> Admin
+                  <span style={{ fontSize: 10.5, fontWeight: 800, background: isSuperAdmin ? c.primary : c.gold, color: isSuperAdmin ? c.white : c.navy, padding: '3px 9px', borderRadius: 999, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{isSuperAdmin ? 'Super Admin' : 'Admin'}</span>
+                </h2>
+                <p style={{ color: c.textMuted, fontSize: 13 }}>Platform overview and management.</p>
+              </div>
+              {isSuperAdmin && (
+                <button onClick={() => setShowRolePerms(true)} style={{ padding: '9px 14px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><KeyRound size={13} /> Role Permissions</button>
+              )}
             </div>
+
+            {/* Impersonation controls */}
+            <div style={{ background: c.cream, border: `1px dashed ${c.border}`, borderRadius: 12, padding: 14, marginBottom: 18 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Preview the app as another role</div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => startImpersonate('worker')} style={{ padding: '8px 14px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><User size={13} /> View as Teacher</button>
+                <button onClick={() => startImpersonate('owner')} style={{ padding: '8px 14px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Building2 size={13} /> View as Director</button>
+                <button onClick={() => startImpersonate('partner')} style={{ padding: '8px 14px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Handshake size={13} /> View as Partner</button>
+              </div>
+            </div>
+
             {!adminData ? (
               <div style={{ padding: 40, textAlign: 'center', color: c.textMuted }}>Loading platform data…</div>
-            ) : (
-              <>
-                {/* Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ marginBottom: 20 }}>
-                  {[
-                    { label: 'Teachers', value: adminData.profiles.filter(p => p.role === 'worker').length },
-                    { label: 'Centers', value: adminData.profiles.filter(p => p.role === 'owner').length },
-                    { label: 'Jobs Posted', value: adminData.jobs.length },
-                    { label: 'Applications', value: adminData.applications.length },
-                    { label: 'Partners', value: adminData.profiles.filter(p => p.role === 'partner').length },
-                    { label: 'Sub Requests', value: adminData.subs.length },
-                    { label: 'Trusted Teachers', value: adminData.profiles.filter(p => p.trusted_network).length },
-                    { label: 'Open Sub Shifts', value: adminData.subs.filter(s => s.status === 'open').length },
-                  ].map((s, i) => (
-                    <div key={i} style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: 14 }}>
-                      <div style={{ fontSize: 24, fontWeight: 800, color: c.primary, letterSpacing: '-0.02em' }}>{s.value}</div>
-                      <div style={{ fontSize: 10.5, color: c.textMuted, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>{s.label}</div>
+            ) : current ? (
+              /* ===== SECTION DETAIL VIEW ===== */
+              <div>
+                <button onClick={() => { setAdminSection(null); setAdminUserSearch(''); }} style={{ color: c.textMuted, fontSize: 13, background: 'none', border: 'none', cursor: 'pointer', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 4 }}><ChevronLeft size={14} /> Back to dashboard</button>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>{current.label} ({current.rows.length})</h3>
+                  <input value={adminUserSearch} onChange={e => setAdminUserSearch(e.target.value)} placeholder="Search…" style={{ padding: '8px 12px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', minWidth: 200 }} />
+                </div>
+                <div className="space-y-1.5">
+                  {current.rows.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: c.textMuted, fontSize: 13, background: c.white, border: `1px dashed ${c.border}`, borderRadius: 10 }}>No records yet.</div>}
+                  {current.type === 'profiles' && current.rows.filter(p => {
+                    const q = adminUserSearch.toLowerCase();
+                    return !q || (p.name||'').toLowerCase().includes(q) || (p.email||'').toLowerCase().includes(q) || (p.center||'').toLowerCase().includes(q);
+                  }).map(p => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: c.white, border: `1px solid ${c.border}`, borderRadius: 10, flexWrap: 'wrap' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {p.role === 'owner' ? (p.center || p.business_name || p.name || 'Center') : (p.name || 'Unnamed')}
+                          {p.admin_level && p.admin_level !== 'none' && <span style={{ fontSize: 9.5, fontWeight: 800, background: p.admin_level === 'super_admin' ? c.primary : c.gold, color: p.admin_level === 'super_admin' ? c.white : c.navy, padding: '2px 6px', borderRadius: 999, textTransform: 'uppercase' }}>{p.admin_level === 'super_admin' ? 'Super' : 'Admin'}</span>}
+                          {p.trusted_network && <span style={{ fontSize: 9.5, fontWeight: 800, background: c.success, color: c.white, padding: '2px 6px', borderRadius: 999, textTransform: 'uppercase' }}>Trusted</span>}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{p.email}{p.phone ? ` · ${p.phone}` : ''}{p.city ? ` · ${p.city}` : ''}{p.years_experience ? ` · ${p.years_experience}` : ''}{p.subscription_plan ? ` · ${p.subscription_plan}` : ''}</div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                        {p.role === 'worker' && (
+                          <button onClick={() => adminToggleTrusted(p.id, !p.trusted_network)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${p.trusted_network ? c.success : c.border}`, background: p.trusted_network ? c.success : c.white, color: p.trusted_network ? c.white : c.text }}>{p.trusted_network ? 'Trusted ✓' : 'Add to Trusted'}</button>
+                        )}
+                        {isSuperAdmin && (
+                          <select value={p.admin_level || 'none'} onChange={e => adminSetLevel(p.id, e.target.value)} style={{ padding: '5px 8px', fontSize: 11, fontWeight: 700, borderRadius: 8, border: `1.5px solid ${c.border}`, background: c.white, color: c.text, cursor: 'pointer' }}>
+                            <option value="none">No admin</option>
+                            <option value="admin">Admin</option>
+                            <option value="super_admin">Super Admin</option>
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {current.type === 'jobs' && current.rows.filter(j => { const q = adminUserSearch.toLowerCase(); return !q || (j.title||'').toLowerCase().includes(q) || (j.center||'').toLowerCase().includes(q); }).map(j => (
+                    <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: c.white, border: `1px solid ${c.border}`, borderRadius: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy }}>{j.title} {!j.active && <span style={{ fontSize: 10, color: c.coralDark, fontWeight: 700 }}>(inactive)</span>}</div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{j.center}{j.location ? ` · ${j.location}` : ''}{j.pay ? ` · ${j.pay}` : ''} · {formatRelativeTime(j.posted_at)}</div>
+                      </div>
+                      <button onClick={() => adminToggleJob(j.id, !j.active)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${j.active ? c.border : c.coral}`, background: j.active ? c.white : c.coralDark, color: j.active ? c.coralDark : c.white, flexShrink: 0 }}>{j.active ? 'Deactivate' : 'Reactivate'}</button>
+                    </div>
+                  ))}
+                  {current.type === 'applications' && current.rows.map(a => {
+                    const job = jobById[a.job_id]; const wk = profById[a.worker_id];
+                    return (
+                      <div key={a.id} style={{ padding: '10px 12px', background: c.white, border: `1px solid ${c.border}`, borderRadius: 10 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy }}>{wk?.name || 'Teacher'} → {job?.title || 'a job'}</div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{job?.center || ''} · <span style={{ textTransform: 'capitalize' }}>{a.status}</span> · {formatRelativeTime(a.applied_at)}</div>
+                      </div>
+                    );
+                  })}
+                  {current.type === 'subs' && current.rows.map(s => (
+                    <div key={s.id} style={{ padding: '10px 12px', background: c.white, border: `1px solid ${c.border}`, borderRadius: 10 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy }}>{s.center_name || 'Center'} · {shiftDatesLabel(s)}</div>
+                      <div style={{ fontSize: 11.5, color: c.textMuted }}>{[s.age_group, s.pay_rate].filter(Boolean).join(' · ')} · <span style={{ textTransform: 'capitalize' }}>{s.status}</span></div>
                     </div>
                   ))}
                 </div>
-
-                {/* Users */}
-                <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
-                  <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 12 }}>
-                    <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>Users ({adminData.profiles.length})</h3>
-                    <input value={adminUserSearch} onChange={e => setAdminUserSearch(e.target.value)} placeholder="Search name or email…" style={{ padding: '8px 12px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', minWidth: 200 }} />
-                  </div>
-                  <div style={{ maxHeight: 420, overflowY: 'auto' }} className="space-y-1.5">
-                    {adminData.profiles
-                      .filter(p => {
-                        const q = adminUserSearch.toLowerCase();
-                        return !q || (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q) || (p.center || '').toLowerCase().includes(q);
-                      })
-                      .map(p => (
-                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '9px 11px', background: c.cream, borderRadius: 9, flexWrap: 'wrap' }}>
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, color: c.navy, display: 'flex', alignItems: 'center', gap: 6 }}>
-                              {p.role === 'owner' ? (p.center || p.business_name || p.name) : (p.name || 'Unnamed')}
-                              {p.is_super_admin && <span style={{ fontSize: 9.5, fontWeight: 800, background: c.primary, color: c.white, padding: '2px 6px', borderRadius: 999, textTransform: 'uppercase' }}>Admin</span>}
-                            </div>
-                            <div style={{ fontSize: 11.5, color: c.textMuted }}>{p.email} · <span style={{ textTransform: 'capitalize' }}>{p.role}</span>{p.city ? ` · ${p.city}` : ''}</div>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {p.role === 'worker' && (
-                              <button onClick={() => adminToggleTrusted(p.id, !p.trusted_network)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${p.trusted_network ? c.success : c.border}`, background: p.trusted_network ? c.success : c.white, color: p.trusted_network ? c.white : c.text }}>
-                                {p.trusted_network ? 'Trusted ✓' : 'Add to Trusted'}
-                              </button>
-                            )}
-                            <button onClick={() => adminToggleSuperAdmin(p.id, !p.is_super_admin)} title="Toggle super admin" style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${c.border}`, background: c.white, color: p.is_super_admin ? c.coralDark : c.textMuted }}>
-                              {p.is_super_admin ? 'Revoke admin' : 'Make admin'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-
-                {/* Jobs moderation */}
-                <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18 }}>
-                  <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 12 }}>Jobs ({adminData.jobs.length})</h3>
-                  <div style={{ maxHeight: 360, overflowY: 'auto' }} className="space-y-1.5">
-                    {adminData.jobs.length === 0 ? (
-                      <div style={{ fontSize: 13, color: c.textMuted }}>No jobs posted yet.</div>
-                    ) : adminData.jobs.map(j => (
-                      <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '9px 11px', background: c.cream, borderRadius: 9 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>{j.title}</div>
-                          <div style={{ fontSize: 11.5, color: c.textMuted }}>{j.center} · {formatRelativeTime(j.posted_at)}</div>
-                        </div>
-                        <button onClick={() => adminToggleJob(j.id, !j.active)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${j.active ? c.border : c.coral}`, background: j.active ? c.white : c.coralDark, color: j.active ? c.coralDark : c.white, flexShrink: 0 }}>
-                          {j.active ? 'Deactivate' : 'Reactivate'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
+              </div>
+            ) : (
+              /* ===== DASHBOARD: clickable cards ===== */
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {visibleSections.map(s => (
+                  <button key={s.key} onClick={() => { setAdminSection(s.key); setAdminUserSearch(''); }} style={{ textAlign: 'left', background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: 16, cursor: 'pointer' }} className="hover:border-blue-400 transition-all">
+                    <div style={{ fontSize: 26, fontWeight: 800, color: c.primary, letterSpacing: '-0.02em' }}>{s.rows.length}</div>
+                    <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      {s.label} <ArrowRight size={12} />
+                    </div>
+                  </button>
+                ))}
+                {visibleSections.length === 0 && (
+                  <div style={{ gridColumn: '1 / -1', padding: 30, textAlign: 'center', color: c.textMuted, fontSize: 13, background: c.white, border: `1px dashed ${c.border}`, borderRadius: 12 }}>No sections enabled for your role. Ask a Super Admin to grant access.</div>
+                )}
+              </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {tab === 'subs' && signedIn && userType === 'owner' && (
           <div>
@@ -4712,6 +4802,41 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ROLE PERMISSIONS — super admin controls which sections Admins see */}
+      {showRolePerms && isSuperAdmin && (
+        <Modal onClose={() => setShowRolePerms(false)}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Admin Role Permissions</h3>
+            <button onClick={() => setShowRolePerms(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+          <p style={{ fontSize: 13, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>Choose which sections the <strong>Admin</strong> role can see on their dashboard. Super Admins always see everything.</p>
+          <div className="space-y-1.5" style={{ marginBottom: 16 }}>
+            {[
+              { key: 'teachers', label: 'Teachers' },
+              { key: 'centers', label: 'Centers' },
+              { key: 'jobs', label: 'Jobs Posted' },
+              { key: 'applications', label: 'Applications' },
+              { key: 'partners', label: 'Partners' },
+              { key: 'sub_requests', label: 'Sub Requests' },
+              { key: 'trusted_teachers', label: 'Trusted Teachers' },
+              { key: 'sub_shifts', label: 'Open Sub Shifts' },
+            ].map(s => {
+              const on = adminAllowedSections.includes(s.key);
+              return (
+                <button key={s.key} onClick={() => toggleAllowedSection(s.key)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', background: on ? '#EAF6EE' : c.white, border: `1.5px solid ${on ? c.success : c.border}`, borderRadius: 10, cursor: 'pointer' }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 700, color: c.navy }}>{s.label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: on ? c.success : c.textMuted }}>{on ? 'Allowed ✓' : 'Hidden'}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowRolePerms(false)} style={{ padding: '10px 18px', background: c.white, color: c.text, border: `1.5px solid ${c.border}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+            <button onClick={saveRolePerms} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Check size={14} /> Save Permissions</button>
+          </div>
+        </Modal>
+      )}
 
       {/* POST SUB REQUEST */}
       {showSubRequest && (
