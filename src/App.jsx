@@ -2182,7 +2182,9 @@ export default function App() {
       { id: 'partners', label: 'Partners', icon: Handshake }
     ];
     if (!signedIn || userType === 'owner') base.splice(1, 0, { id: 'templates', label: 'Job Templates', icon: LayoutGrid });
-    if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'subs', label: 'Sub Shifts', icon: Calendar });
+    // Sub Shifts shows for logged-out visitors too (as a sign-up teaser),
+    // so the nav stays consistent before and after login.
+    if (!signedIn || userType === 'worker' || userType === 'owner') base.splice(1, 0, { id: 'subs', label: 'Sub Shifts', icon: Calendar });
     if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'messages', label: 'Messages', icon: Mail, badge: myUnreadCount });
     if (signedIn && userType === 'worker' && profileComplete) base.push({ id: 'myProfile', label: 'My Profile', icon: User });
     if (signedIn && userType === 'owner') base.push({ id: 'myCenter', label: 'My Center', icon: Building2 });
@@ -2244,6 +2246,7 @@ export default function App() {
         const messages = {
           jobs:      { headline: 'Sign up to browse open positions', body: 'Create a free Teacher account to see every childcare job posted across Georgia, save the ones you like, and apply with one click.', recommend: 'worker' },
           templates: { headline: 'Sign up to post jobs with templates', body: 'Create a Daycare Center account to start hiring. We offer ready-made templates so you can post a position in under two minutes.', recommend: 'owner' },
+          subs:      { headline: 'Sign up to view Sub Shifts', body: 'Create a free account to pick up open substitute shifts at Georgia centers — or, as a daycare center, post a shift when you need coverage fast.', recommend: 'worker' },
           training:  { headline: 'Sign up to access the Training Hub', body: 'Create a free account to explore credential paths, GELDS-aligned training, and Georgia DECAL renewal information.', recommend: 'worker' },
           licensing: { headline: 'Sign up to view State Licensing details', body: 'Create a free account to access Georgia DECAL licensing requirements, background-check steps, and credential renewal timelines.', recommend: 'worker' },
           partners:  { headline: 'Sign up to browse Partners', body: 'Create a free account to view trusted training providers, consultants, and centers across Georgia.', recommend: 'worker' },
