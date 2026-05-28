@@ -1594,20 +1594,32 @@ export default function App() {
       const img = new Image();
       img.onload = async () => {
         const canvas = document.createElement('canvas');
-        const max = 400;
+        // Only scale DOWN if the image is larger than the cap; smaller
+        // images are kept at their real size (no upscaling/blurring).
+        const max = 512;
         let { width, height } = img;
-        if (width > height) { if (width > max) { height *= max / width; width = max; } }
-        else { if (height > max) { width *= max / height; height = max; } }
+        const scale = Math.min(1, max / Math.max(width, height));
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
-        // PNG and WebP support transparency; JPEG does not (it fills
-        // transparent pixels with black). Keep transparent uploads as PNG.
-        const keepsAlpha = file.type === 'image/png' || file.type === 'image/webp';
-        const outType = keepsAlpha ? 'image/png' : 'image/jpeg';
-        const outExt = keepsAlpha ? 'png' : 'jpg';
+        // Import in the file's own format so it looks exactly like the
+        // original (PNG/WebP keep transparency; JPEG stays JPEG). Only the
+        // dimensions change. High quality so there's no visible loss.
+        const t = (file.type || '').toLowerCase();
+        let outType, outExt, dataUrl;
         ctx.clearRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = keepsAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85);
+        if (t === 'image/png') {
+          outType = 'image/png'; outExt = 'png'; dataUrl = canvas.toDataURL('image/png');
+        } else if (t === 'image/webp') {
+          outType = 'image/webp'; outExt = 'webp'; dataUrl = canvas.toDataURL('image/webp', 0.95);
+        } else if (t === 'image/gif') {
+          // Canvas can't keep GIF animation; export lossless PNG instead.
+          outType = 'image/png'; outExt = 'png'; dataUrl = canvas.toDataURL('image/png');
+        } else {
+          outType = 'image/jpeg'; outExt = 'jpg'; dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        }
         // Optimistic preview while the upload runs
         setProfile(p => ({ ...p, photo: dataUrl }));
         try {
