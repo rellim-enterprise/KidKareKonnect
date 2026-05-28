@@ -1600,13 +1600,19 @@ export default function App() {
         else { if (height > max) { width *= max / height; height = max; } }
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
+        // PNG and WebP support transparency; JPEG does not (it fills
+        // transparent pixels with black). Keep transparent uploads as PNG.
+        const keepsAlpha = file.type === 'image/png' || file.type === 'image/webp';
+        const outType = keepsAlpha ? 'image/png' : 'image/jpeg';
+        const outExt = keepsAlpha ? 'png' : 'jpg';
+        ctx.clearRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = keepsAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85);
         // Optimistic preview while the upload runs
         setProfile(p => ({ ...p, photo: dataUrl }));
         try {
           const blob = await (await fetch(dataUrl)).blob();
-          const publicUrl = await uploadToStorage(`photo-${Date.now()}.jpg`, blob, 'image/jpeg');
+          const publicUrl = await uploadToStorage(`photo-${Date.now()}.${outExt}`, blob, outType);
           setProfile(p => ({ ...p, photo: publicUrl }));
         } catch (err) {
           alert(`Couldn't upload photo: ${err.message}`);
