@@ -3537,8 +3537,20 @@ export default function App() {
           <div>
             <div className="mb-4">
               <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>State Licensing</h2>
-              <p style={{ color: c.textMuted, fontSize: 13 }}>Pick your state to see qualifications and background check steps.</p>
+              <p style={{ color: c.textMuted, fontSize: 13 }}>Georgia childcare qualifications and background check steps.</p>
             </div>
+
+            {/* More-states-coming teaser banner */}
+            <div style={{ background: 'linear-gradient(135deg, #FFF1DD 0%, #FFE0BD 100%)', border: `1px solid ${c.gold}`, borderRadius: 12, padding: '14px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 13 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: c.white, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 6px rgba(15,42,61,0.08)' }}>
+                <MapPin size={19} color="#FF8C42" />
+              </div>
+              <div>
+                <div style={{ fontSize: 14.5, fontWeight: 800, color: c.navy, marginBottom: 2, letterSpacing: '-0.01em' }}>Starting in Georgia — more states are on the way.</div>
+                <div style={{ fontSize: 12.5, color: c.textMuted, lineHeight: 1.45 }}>We're growing one community at a time, getting it right before we expand. Georgia today, your state soon.</div>
+              </div>
+            </div>
+
             <div style={{ marginBottom: 16, maxWidth: 320 }}>
               <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Select your state</label>
               <select value={stateSel} onChange={e => setStateSel(e.target.value)} style={{ width: '100%', padding: '9px 13px', fontSize: 13.5, background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 9, color: c.text, outline: 'none', fontWeight: 500 }}>
