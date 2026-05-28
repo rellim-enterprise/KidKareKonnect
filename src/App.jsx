@@ -4983,7 +4983,6 @@ export default function App() {
               <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Manage User</h3>
               <div style={{ fontSize: 12, color: c.textMuted }}>{adminViewUser.email} · <span style={{ textTransform: 'capitalize' }}>{adminViewUser.role}</span></div>
             </div>
-            <button onClick={() => setAdminViewUser(null)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
 
           {/* Editable profile */}
@@ -5033,7 +5032,6 @@ export default function App() {
         <Modal onClose={() => setAdminViewJob(null)}>
           <div className="flex items-center justify-between mb-3">
             <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Manage Job</h3>
-            <button onClick={() => setAdminViewJob(null)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
           <div className="space-y-2" style={{ marginBottom: 14 }}>
             <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Title</label><input value={adminJobEdit.title} onChange={e => setAdminJobEdit({ ...adminJobEdit, title: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
@@ -5057,7 +5055,6 @@ export default function App() {
         <Modal onClose={() => setShowRolePerms(false)}>
           <div className="flex items-center justify-between mb-2">
             <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Admin Role Permissions</h3>
-            <button onClick={() => setShowRolePerms(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
           <p style={{ fontSize: 13, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>Choose which sections the <strong>Admin</strong> role can see on their dashboard. Super Admins always see everything.</p>
           <div className="space-y-1.5" style={{ marginBottom: 16 }}>
@@ -5092,7 +5089,6 @@ export default function App() {
         <Modal onClose={() => setShowSubRequest(false)}>
           <div className="flex items-center justify-between mb-1">
             <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>{editingSubId ? 'Edit Sub Request' : 'Request a Substitute'}</h3>
-            <button onClick={() => { setShowSubRequest(false); setEditingSubId(null); }} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
           <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>{editingSubId ? 'Update the details below and save your changes.' : 'Available teachers get notified instantly. The first you confirm gets the shift.'}</p>
           <div className="space-y-3">
@@ -5203,7 +5199,6 @@ export default function App() {
         <Modal onClose={() => setShowLeaveReview(false)}>
           <div className="flex items-center justify-between mb-3">
             <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Leave a Review</h3>
-            <button onClick={() => setShowLeaveReview(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
           <p style={{ fontSize: 13, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>
             How was your experience working with <strong>{viewingApplicantDetail.name}</strong>? Your honest feedback helps other centers identify reliable teachers and helps great teachers stand out.
@@ -5245,7 +5240,6 @@ export default function App() {
         <Modal onClose={() => setShowSavedCandidates(false)} wide>
           <div className="flex items-center justify-between mb-3">
             <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>Saved Candidates</h3>
-            <button onClick={() => setShowSavedCandidates(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
           <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 14 }}>{savedCandidatesFull.length} saved across all your job posts. Tap the heart to remove.</p>
           {savedCandidatesFull.length === 0 ? (
@@ -5311,7 +5305,6 @@ export default function App() {
               </div>
               <p style={{ fontSize: 12.5, color: c.textMuted }}>Verified teachers with high reliability scores, strong credentials, and proven track records.</p>
             </div>
-            <button onClick={() => setShowTrustedNetwork(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
           {trustedNetworkFull.length === 0 ? (
             <div style={{ padding: 36, textAlign: 'center', background: c.cream, borderRadius: 10 }}>
