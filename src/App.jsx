@@ -220,6 +220,31 @@ async function kkLoadWorkerHistory(workerId) {
   };
 }
 
+// ===================== SUPER ADMIN =====================
+async function kkAdminLoadOverview() {
+  const [profiles, jobs, subs, apps] = await Promise.all([
+    supabase.from('profiles').select('id, name, email, role, center, business_name, city, state, trusted_network, is_super_admin, profile_complete, created_at').order('created_at', { ascending: false }),
+    supabase.from('jobs').select('id, title, center, owner_id, active, posted_at').order('posted_at', { ascending: false }),
+    supabase.from('sub_requests').select('id, status').order('created_at', { ascending: false }),
+    supabase.from('applications').select('id'),
+  ]);
+  return {
+    profiles: profiles.data || [],
+    jobs: jobs.data || [],
+    subs: subs.data || [],
+    applications: apps.data || [],
+  };
+}
+async function kkAdminSetTrusted(userId, value) {
+  return supabase.from('profiles').update({ trusted_network: value }).eq('id', userId);
+}
+async function kkAdminSetJobActive(jobId, value) {
+  return supabase.from('jobs').update({ active: value }).eq('id', jobId);
+}
+async function kkAdminSetSuperAdmin(userId, value) {
+  return supabase.from('profiles').update({ is_super_admin: value }).eq('id', userId);
+}
+
 // ===================== SUBSTITUTE STAFFING =====================
 function formatShiftDate(s) {
   if (!s) return '';
@@ -870,6 +895,10 @@ export default function App() {
   const [myOfferRequestIds, setMyOfferRequestIds] = useState([]);
   const [availableForSub, setAvailableForSub] = useState(false);
   const [subSchedule, setSubSchedule] = useState({ days: [], from: '', until: '', note: '' });
+  // Super admin
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [adminData, setAdminData] = useState(null);
+  const [adminUserSearch, setAdminUserSearch] = useState('');
   const [showSubRequest, setShowSubRequest] = useState(false);
   const [editingSubId, setEditingSubId] = useState(null);
   const [subForm, setSubForm] = useState({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
@@ -1698,6 +1727,36 @@ export default function App() {
     })();
   }, [signedIn, userType, posted.length]);
 
+  // Detect super-admin status on sign-in so the Admin tab can appear.
+  useEffect(() => {
+    if (!signedIn) { setIsSuperAdmin(false); return; }
+    (async () => {
+      const { data } = await supabase.rpc('is_super_admin');
+      setIsSuperAdmin(!!data);
+    })();
+  }, [signedIn]);
+
+  // Load platform-wide data when an admin opens the Admin tab.
+  useEffect(() => {
+    if (signedIn && isSuperAdmin && tab === 'admin') {
+      kkAdminLoadOverview().then(setAdminData);
+    }
+  }, [signedIn, isSuperAdmin, tab]);
+
+  const adminToggleTrusted = async (userId, value) => {
+    await kkAdminSetTrusted(userId, value);
+    setAdminData(d => d ? { ...d, profiles: d.profiles.map(p => p.id === userId ? { ...p, trusted_network: value } : p) } : d);
+  };
+  const adminToggleJob = async (jobId, value) => {
+    await kkAdminSetJobActive(jobId, value);
+    setAdminData(d => d ? { ...d, jobs: d.jobs.map(j => j.id === jobId ? { ...j, active: value } : j) } : d);
+  };
+  const adminToggleSuperAdmin = async (userId, value) => {
+    if (!window.confirm(value ? 'Grant super-admin access to this user?' : 'Remove super-admin access from this user?')) return;
+    await kkAdminSetSuperAdmin(userId, value);
+    setAdminData(d => d ? { ...d, profiles: d.profiles.map(p => p.id === userId ? { ...p, is_super_admin: value } : p) } : d);
+  };
+
   // Load the owner's center profile (address, quality rated, hours) so
   // the My Center editor shows their saved data across devices.
   useEffect(() => {
@@ -2188,6 +2247,7 @@ export default function App() {
     if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'messages', label: 'Messages', icon: Mail, badge: myUnreadCount });
     if (signedIn && userType === 'worker' && profileComplete) base.push({ id: 'myProfile', label: 'My Profile', icon: User });
     if (signedIn && userType === 'owner') base.push({ id: 'myCenter', label: 'My Center', icon: Building2 });
+    if (signedIn && isSuperAdmin) base.push({ id: 'admin', label: 'Admin', icon: Shield });
     return base;
   };
 
@@ -4117,6 +4177,95 @@ export default function App() {
         )}
 
         {/* MY PROFILE - workers can edit their saved profile */}
+        {tab === 'admin' && signedIn && isSuperAdmin && (
+          <div>
+            <div className="mb-4">
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3, display: 'flex', alignItems: 'center', gap: 8 }}><Shield size={20} color={c.primary} /> Admin</h2>
+              <p style={{ color: c.textMuted, fontSize: 13 }}>Platform overview and management. Visible to super admins only.</p>
+            </div>
+            {!adminData ? (
+              <div style={{ padding: 40, textAlign: 'center', color: c.textMuted }}>Loading platform data…</div>
+            ) : (
+              <>
+                {/* Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ marginBottom: 20 }}>
+                  {[
+                    { label: 'Teachers', value: adminData.profiles.filter(p => p.role === 'worker').length },
+                    { label: 'Centers', value: adminData.profiles.filter(p => p.role === 'owner').length },
+                    { label: 'Jobs Posted', value: adminData.jobs.length },
+                    { label: 'Applications', value: adminData.applications.length },
+                    { label: 'Partners', value: adminData.profiles.filter(p => p.role === 'partner').length },
+                    { label: 'Sub Requests', value: adminData.subs.length },
+                    { label: 'Trusted Teachers', value: adminData.profiles.filter(p => p.trusted_network).length },
+                    { label: 'Open Sub Shifts', value: adminData.subs.filter(s => s.status === 'open').length },
+                  ].map((s, i) => (
+                    <div key={i} style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 12, padding: 14 }}>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: c.primary, letterSpacing: '-0.02em' }}>{s.value}</div>
+                      <div style={{ fontSize: 10.5, color: c.textMuted, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Users */}
+                <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18, marginBottom: 16 }}>
+                  <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 12 }}>
+                    <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>Users ({adminData.profiles.length})</h3>
+                    <input value={adminUserSearch} onChange={e => setAdminUserSearch(e.target.value)} placeholder="Search name or email…" style={{ padding: '8px 12px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', minWidth: 200 }} />
+                  </div>
+                  <div style={{ maxHeight: 420, overflowY: 'auto' }} className="space-y-1.5">
+                    {adminData.profiles
+                      .filter(p => {
+                        const q = adminUserSearch.toLowerCase();
+                        return !q || (p.name || '').toLowerCase().includes(q) || (p.email || '').toLowerCase().includes(q) || (p.center || '').toLowerCase().includes(q);
+                      })
+                      .map(p => (
+                        <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '9px 11px', background: c.cream, borderRadius: 9, flexWrap: 'wrap' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: c.navy, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              {p.role === 'owner' ? (p.center || p.business_name || p.name) : (p.name || 'Unnamed')}
+                              {p.is_super_admin && <span style={{ fontSize: 9.5, fontWeight: 800, background: c.primary, color: c.white, padding: '2px 6px', borderRadius: 999, textTransform: 'uppercase' }}>Admin</span>}
+                            </div>
+                            <div style={{ fontSize: 11.5, color: c.textMuted }}>{p.email} · <span style={{ textTransform: 'capitalize' }}>{p.role}</span>{p.city ? ` · ${p.city}` : ''}</div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {p.role === 'worker' && (
+                              <button onClick={() => adminToggleTrusted(p.id, !p.trusted_network)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${p.trusted_network ? c.success : c.border}`, background: p.trusted_network ? c.success : c.white, color: p.trusted_network ? c.white : c.text }}>
+                                {p.trusted_network ? 'Trusted ✓' : 'Add to Trusted'}
+                              </button>
+                            )}
+                            <button onClick={() => adminToggleSuperAdmin(p.id, !p.is_super_admin)} title="Toggle super admin" style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${c.border}`, background: c.white, color: p.is_super_admin ? c.coralDark : c.textMuted }}>
+                              {p.is_super_admin ? 'Revoke admin' : 'Make admin'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Jobs moderation */}
+                <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 18 }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 800, color: c.navy, marginBottom: 12 }}>Jobs ({adminData.jobs.length})</h3>
+                  <div style={{ maxHeight: 360, overflowY: 'auto' }} className="space-y-1.5">
+                    {adminData.jobs.length === 0 ? (
+                      <div style={{ fontSize: 13, color: c.textMuted }}>No jobs posted yet.</div>
+                    ) : adminData.jobs.map(j => (
+                      <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '9px 11px', background: c.cream, borderRadius: 9 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>{j.title}</div>
+                          <div style={{ fontSize: 11.5, color: c.textMuted }}>{j.center} · {formatRelativeTime(j.posted_at)}</div>
+                        </div>
+                        <button onClick={() => adminToggleJob(j.id, !j.active)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${j.active ? c.border : c.coral}`, background: j.active ? c.white : c.coralDark, color: j.active ? c.coralDark : c.white, flexShrink: 0 }}>
+                          {j.active ? 'Deactivate' : 'Reactivate'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {tab === 'subs' && signedIn && userType === 'owner' && (
           <div>
             <div className="flex items-start justify-between mb-2 flex-wrap gap-3">
