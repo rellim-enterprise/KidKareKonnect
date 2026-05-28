@@ -871,6 +871,7 @@ export default function App() {
   const [availableForSub, setAvailableForSub] = useState(false);
   const [subSchedule, setSubSchedule] = useState({ days: [], from: '', until: '', note: '' });
   const [showSubRequest, setShowSubRequest] = useState(false);
+  const [editingSubId, setEditingSubId] = useState(null);
   const [subForm, setSubForm] = useState({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
   const [showLeaveReview, setShowLeaveReview] = useState(false);
   const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
@@ -1729,6 +1730,27 @@ export default function App() {
     }
   }, [signedIn, userType, tab]);
 
+  const openNewSubRequest = () => {
+    setEditingSubId(null);
+    setSubForm({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
+    setShowSubRequest(true);
+  };
+
+  const openEditSubRequest = (r) => {
+    setEditingSubId(r.id);
+    setSubForm({
+      dates: (r.shift_dates && r.shift_dates.length) ? [...r.shift_dates] : (r.shift_date ? [r.shift_date] : []),
+      dateInput: '',
+      start_time: r.start_time || '',
+      end_time: r.end_time || '',
+      age_group: r.age_group || 'Toddler',
+      pay_rate: r.pay_rate || '',
+      location: r.location || '',
+      notes: r.notes || '',
+    });
+    setShowSubRequest(true);
+  };
+
   const postSubRequest = async () => {
     // Include any date still typed in the picker but not yet "added".
     const allDates = Array.from(new Set([...subForm.dates, ...(subForm.dateInput ? [subForm.dateInput] : [])]));
@@ -1736,9 +1758,7 @@ export default function App() {
     const sorted = [...allDates].sort();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { alert('Please sign in again.'); return; }
-    const { data: row, error } = await kkCreateSubRequest({
-      owner_id: user.id,
-      center_name: signup.center || 'Your Center',
+    const fields = {
       shift_date: sorted[0],          // earliest, for sorting + NOT NULL
       shift_dates: sorted,            // full list
       start_time: subForm.start_time || null,
@@ -1747,11 +1767,29 @@ export default function App() {
       pay_rate: subForm.pay_rate || null,
       location: subForm.location || centerProfile.address || null,
       notes: subForm.notes || null,
-    });
-    if (error || !row) { alert(`Could not post the request: ${error?.message || 'unknown error'}`); return; }
-    kkNotify({ type: 'sub_request_posted', subRequestId: row.id });
+    };
+    if (editingSubId) {
+      const { error } = await supabase.from('sub_requests').update(fields).eq('id', editingSubId);
+      if (error) { alert(`Could not update the request: ${error.message}`); return; }
+    } else {
+      const { data: row, error } = await kkCreateSubRequest({
+        owner_id: user.id,
+        center_name: signup.center || 'Your Center',
+        ...fields,
+      });
+      if (error || !row) { alert(`Could not post the request: ${error?.message || 'unknown error'}`); return; }
+      kkNotify({ type: 'sub_request_posted', subRequestId: row.id });
+    }
     setShowSubRequest(false);
+    setEditingSubId(null);
     setSubForm({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
+    await reloadSubData();
+  };
+
+  const cancelSubRequest = async (id) => {
+    if (!window.confirm('Cancel this sub request? Teachers will no longer see it.')) return;
+    const { error } = await supabase.from('sub_requests').update({ status: 'canceled' }).eq('id', id);
+    if (error) { alert(`Could not cancel: ${error.message}`); return; }
     await reloadSubData();
   };
 
@@ -4060,7 +4098,7 @@ export default function App() {
                 <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>Sub Shifts</h2>
                 <p style={{ color: c.textMuted, fontSize: 13 }}>Need a substitute fast? Post a shift and available teachers are notified instantly.</p>
               </div>
-              <button onClick={() => setShowSubRequest(true)} style={{ padding: '11px 18px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={openNewSubRequest} style={{ padding: '11px 18px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <Plus size={15} /> I Need a Sub Today
               </button>
             </div>
@@ -4081,9 +4119,17 @@ export default function App() {
                         </div>
                         {r.notes && <div style={{ fontSize: 12.5, color: c.text, marginTop: 4, fontStyle: 'italic' }}>"{r.notes}"</div>}
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 999, background: r.status === 'filled' ? c.success : (r.status === 'open' ? c.gold : c.border), color: r.status === 'filled' ? c.white : c.navy, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        {r.status === 'filled' ? 'Filled' : r.status}
-                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 999, background: r.status === 'filled' ? c.success : (r.status === 'open' ? c.gold : c.border), color: r.status === 'filled' ? c.white : c.navy, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {r.status === 'filled' ? 'Filled' : r.status}
+                        </span>
+                        {r.status === 'open' && (
+                          <>
+                            <button onClick={() => openEditSubRequest(r)} aria-label="Edit request" title="Edit" style={{ background: 'none', border: `1px solid ${c.border}`, borderRadius: 8, padding: '5px 9px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: c.primary, display: 'flex', alignItems: 'center', gap: 4 }}>Edit</button>
+                            <button onClick={() => cancelSubRequest(r.id)} aria-label="Cancel request" title="Cancel" style={{ background: 'none', border: `1px solid ${c.border}`, borderRadius: 8, padding: '5px 9px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, color: c.coralDark }}>Cancel</button>
+                          </>
+                        )}
+                      </div>
                     </div>
                     {r.status === 'open' && (
                       <div style={{ borderTop: `1px solid ${c.borderSoft}`, paddingTop: 10, marginTop: 6 }}>
@@ -4496,10 +4542,10 @@ export default function App() {
       {showSubRequest && (
         <Modal onClose={() => setShowSubRequest(false)}>
           <div className="flex items-center justify-between mb-1">
-            <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>Request a Substitute</h3>
-            <button onClick={() => setShowSubRequest(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+            <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>{editingSubId ? 'Edit Sub Request' : 'Request a Substitute'}</h3>
+            <button onClick={() => { setShowSubRequest(false); setEditingSubId(null); }} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
           </div>
-          <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>Available teachers get notified instantly. The first you confirm gets the shift.</p>
+          <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>{editingSubId ? 'Update the details below and save your changes.' : 'Available teachers get notified instantly. The first you confirm gets the shift.'}</p>
           <div className="space-y-3">
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Which day(s) do you need covered?</label>
@@ -4553,7 +4599,7 @@ export default function App() {
               <textarea value={subForm.notes} onChange={e => setSubForm({ ...subForm, notes: e.target.value })} rows={2} placeholder="e.g. Lead teacher out sick, need coverage for the toddler room." style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }} />
             </div>
             <button onClick={postSubRequest} style={{ width: '100%', padding: '12px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              <Send size={14} /> Send to Available Teachers
+              <Send size={14} /> {editingSubId ? 'Save Changes' : 'Send to Available Teachers'}
             </button>
           </div>
         </Modal>
