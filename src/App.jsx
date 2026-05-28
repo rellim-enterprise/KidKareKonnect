@@ -913,7 +913,6 @@ export default function App() {
   const [applied, setApplied] = useState([]);
   const [jobSearch, setJobSearch] = useState('');
   const [jobFilter, setJobFilter] = useState('all');
-  const [locationFilter, setLocationFilter] = useState('myArea');
   const [plan, setPlan] = useState(null);
   const [posted, setPosted] = useState([]);
   const [showPost, setShowPost] = useState(false);
@@ -2382,18 +2381,15 @@ export default function App() {
   const myUnreadCount = myConversations.reduce((sum, c) => sum + ((c.unreadFor || []).includes(signup.email) ? 1 : 0), 0);
 
   const visibleJobs = useMemo(() => {
-    // Real jobs from Supabase appear above demo SAMPLE_JOBS.
-    let jobs = [...realJobs, ...SAMPLE_JOBS];
-    if (signedIn && userType === 'worker' && profileComplete && locationFilter === 'myArea' && profile.state) {
-      jobs = jobs.filter(j => j.state === profile.state);
-    }
+    // Georgia-only for now: every applicant sees only Georgia jobs.
+    let jobs = [...realJobs, ...SAMPLE_JOBS].filter(j => !j.state || j.state === 'Georgia');
     const q = (jobSearch || '').toLowerCase();
     return jobs.filter(j => {
       const s = !q || [j.title, j.location, j.center].some(v => (v || '').toLowerCase().includes(q));
       const f = jobFilter === 'all' || j.type === jobFilter;
       return s && f;
     });
-  }, [realJobs, signedIn, userType, profileComplete, locationFilter, profile.state, jobSearch, jobFilter]);
+  }, [realJobs, jobSearch, jobFilter]);
 
   const allPartners = useMemo(() => [...userListings, ...PARTNERS], [userListings]);
   const filteredPartners = useMemo(() => partnerCat === 'All' ? allPartners : allPartners.filter(p => p.category === partnerCat), [partnerCat, allPartners]);
@@ -3962,7 +3958,7 @@ export default function App() {
                         : `${monthlyJobCount} of ${limit} posts used this month`;
                       return `${posted.length} active${plan ? ` · ${plan} plan · ${limitText}` : ''}`;
                     }
-                    return `${visibleJobs.length} positions${signedIn && profileComplete && locationFilter === 'myArea' ? ` near ${profile.city || profile.state}` : ''}`;
+                    return `${visibleJobs.length} positions across Georgia`;
                   })()}
                 </p>
               </div>
@@ -3995,12 +3991,6 @@ export default function App() {
 
             {userType !== 'owner' && (
               <>
-                {signedIn && profileComplete && (
-                  <div className="flex gap-2 mb-3 flex-wrap">
-                    <button onClick={() => setLocationFilter('myArea')} style={{ padding: '6px 12px', background: locationFilter === 'myArea' ? c.primary : c.white, color: locationFilter === 'myArea' ? c.white : c.text, border: `1.5px solid ${locationFilter === 'myArea' ? c.primary : c.border}`, borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}><MapPin size={11} /> My Area ({profile.state})</button>
-                    <button onClick={() => setLocationFilter('all')} style={{ padding: '6px 12px', background: locationFilter === 'all' ? c.primary : c.white, color: locationFilter === 'all' ? c.white : c.text, border: `1.5px solid ${locationFilter === 'all' ? c.primary : c.border}`, borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>All States</button>
-                  </div>
-                )}
                 <div className="flex gap-2 mb-4 flex-wrap">
                   <div style={{ flex: 1, minWidth: 220, position: 'relative' }}>
                     <Search size={15} color={c.textMuted} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
