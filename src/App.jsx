@@ -246,6 +246,50 @@ async function kkAdminSetJobActive(jobId, value) {
 async function kkAdminSetAdminLevel(userId, level) {
   return supabase.from('profiles').update({ admin_level: level, is_super_admin: level === 'super_admin' }).eq('id', userId);
 }
+async function kkAdminUpdateProfile(userId, fields) {
+  return supabase.from('profiles').update(fields).eq('id', userId);
+}
+async function kkAdminDeleteJob(jobId) {
+  return supabase.from('jobs').delete().eq('id', jobId);
+}
+async function kkAdminUpdateJob(jobId, fields) {
+  return supabase.from('jobs').update(fields).eq('id', jobId);
+}
+async function kkAdminLoadUserThread(userId) {
+  const { data } = await supabase.from('admin_messages').select('*').eq('user_id', userId).order('created_at', { ascending: true });
+  return data || [];
+}
+async function kkAdminSendUserMessage(userId, body) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: new Error('Not signed in') };
+  return supabase.from('admin_messages').insert({ user_id: userId, sender_id: user.id, is_from_admin: true, body });
+}
+async function kkAdminCallEdge(fn, payload) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { error: 'Not signed in' };
+  const base = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://vennbviwdmcyhcmwdncd.supabase.co';
+  const res = await fetch(`${base}/functions/v1/${fn}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, data, error: res.ok ? null : (data.error || 'Request failed') };
+}
+
+// User-side support thread (their own messages with admins)
+async function kkLoadMySupportThread() {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+  const { data } = await supabase.from('admin_messages').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
+  return data || [];
+}
+async function kkSendSupportReply(body) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: new Error('Not signed in') };
+  return supabase.from('admin_messages').insert({ user_id: user.id, sender_id: user.id, is_from_admin: false, body });
+}
+
 async function kkLoadAdminConfig() {
   const { data } = await supabase.from('admin_config').select('admin_allowed_sections').eq('id', 1).maybeSingle();
   return data?.admin_allowed_sections || ['centers','jobs','applications','partners','sub_requests','trusted_teachers','sub_shifts','teachers'];
@@ -913,6 +957,16 @@ export default function App() {
   const [showRolePerms, setShowRolePerms] = useState(false);
   const [impersonatingRole, setImpersonatingRole] = useState(null);
   const realUserTypeRef = useRef(null);
+  // Admin detail panels
+  const [adminViewUser, setAdminViewUser] = useState(null);   // user row being managed
+  const [adminUserEdit, setAdminUserEdit] = useState(null);   // editable copy of fields
+  const [adminUserThread, setAdminUserThread] = useState([]); // support messages with this user
+  const [adminMsgDraft, setAdminMsgDraft] = useState('');
+  const [adminViewJob, setAdminViewJob] = useState(null);
+  const [adminJobEdit, setAdminJobEdit] = useState(null);
+  // Worker-side support thread
+  const [supportThread, setSupportThread] = useState([]);
+  const [supportDraft, setSupportDraft] = useState('');
   const isSuperAdmin = adminLevel === 'super_admin';
   const isAdmin = adminLevel === 'admin' || adminLevel === 'super_admin';
   const [showSubRequest, setShowSubRequest] = useState(false);
@@ -1764,6 +1818,22 @@ export default function App() {
     }
   }, [signedIn, isAdmin, tab]);
 
+  // Load the user's own support thread (admin↔user) when Messages opens.
+  useEffect(() => {
+    if (signedIn && tab === 'messages') {
+      kkLoadMySupportThread().then(setSupportThread);
+    }
+  }, [signedIn, tab]);
+
+  const sendSupportReplyMsg = async () => {
+    if (!supportDraft.trim()) return;
+    const body = supportDraft.trim();
+    setSupportDraft('');
+    const { error } = await kkSendSupportReply(body);
+    if (error) { alert(`Couldn't send: ${error.message}`); return; }
+    setSupportThread(await kkLoadMySupportThread());
+  };
+
   const adminToggleTrusted = async (userId, value) => {
     await kkAdminSetTrusted(userId, value);
     setAdminData(d => d ? { ...d, profiles: d.profiles.map(p => p.id === userId ? { ...p, trusted_network: value } : p) } : d);
@@ -1786,6 +1856,87 @@ export default function App() {
   };
   const toggleAllowedSection = (key) => {
     setAdminAllowedSections(s => s.includes(key) ? s.filter(x => x !== key) : [...s, key]);
+  };
+
+  // ---- Admin: User Detail panel ----
+  const openAdminUser = async (u) => {
+    setAdminViewUser(u);
+    setAdminUserEdit({
+      name: u.name || '', phone: u.phone || '', city: u.city || '', state: u.state || 'Georgia', zip: u.zip || '',
+      center: u.center || u.business_name || '', bg_check: u.bg_check || '', years_experience: u.years_experience || '',
+    });
+    setAdminMsgDraft('');
+    setAdminUserThread(await kkAdminLoadUserThread(u.id));
+  };
+  const saveAdminUser = async () => {
+    if (!adminViewUser) return;
+    const fields = {
+      name: adminUserEdit.name || null,
+      phone: adminUserEdit.phone || null,
+      city: adminUserEdit.city || null,
+      state: adminUserEdit.state || null,
+      zip: adminUserEdit.zip || null,
+      years_experience: adminUserEdit.years_experience || null,
+      bg_check: adminUserEdit.bg_check || null,
+    };
+    if (adminViewUser.role === 'owner') { fields.center = adminUserEdit.center || null; fields.business_name = adminUserEdit.center || null; }
+    const { error } = await kkAdminUpdateProfile(adminViewUser.id, fields);
+    if (error) { alert(`Couldn't save: ${error.message}`); return; }
+    setAdminData(d => d ? { ...d, profiles: d.profiles.map(p => p.id === adminViewUser.id ? { ...p, ...fields } : p) } : d);
+    setShowSaveToast(true); setTimeout(() => setShowSaveToast(false), 2000);
+  };
+  const adminSendMessage = async () => {
+    if (!adminMsgDraft.trim() || !adminViewUser) return;
+    const body = adminMsgDraft.trim();
+    setAdminMsgDraft('');
+    const { error } = await kkAdminSendUserMessage(adminViewUser.id, body);
+    if (error) { alert(`Couldn't send: ${error.message}`); return; }
+    setAdminUserThread(await kkAdminLoadUserThread(adminViewUser.id));
+  };
+  const adminSendResetLink = async () => {
+    if (!adminViewUser?.email) return;
+    if (!window.confirm(`Email a secure password-reset link to ${adminViewUser.email}?`)) return;
+    const { ok, error } = await kkAdminCallEdge('admin-reset-password', { targetEmail: adminViewUser.email });
+    alert(ok ? 'Reset link sent to their email.' : `Couldn't send reset link: ${error}`);
+  };
+  const adminDeleteUser = async () => {
+    if (!adminViewUser) return;
+    const typed = window.prompt(`This permanently deletes ${adminViewUser.name || adminViewUser.email} and all their data. Type DELETE to confirm.`);
+    if (typed !== 'DELETE') return;
+    const { ok, error } = await kkAdminCallEdge('admin-delete-user', { targetUserId: adminViewUser.id });
+    if (!ok) { alert(`Couldn't delete: ${error}`); return; }
+    setAdminData(d => d ? { ...d, profiles: d.profiles.filter(p => p.id !== adminViewUser.id) } : d);
+    setAdminViewUser(null);
+    alert('Account deleted.');
+  };
+
+  // ---- Admin: Job Detail panel ----
+  const openAdminJob = (j) => {
+    setAdminViewJob(j);
+    setAdminJobEdit({ title: j.title || '', pay: j.pay || '', location: j.location || '', type: j.type || 'Full Time', description: j.description || '' });
+  };
+  const saveAdminJob = async () => {
+    if (!adminViewJob) return;
+    const fields = { title: adminJobEdit.title || null, pay: adminJobEdit.pay || null, location: adminJobEdit.location || null, type: adminJobEdit.type || null, description: adminJobEdit.description || null };
+    const { error } = await kkAdminUpdateJob(adminViewJob.id, fields);
+    if (error) { alert(`Couldn't save: ${error.message}`); return; }
+    setAdminData(d => d ? { ...d, jobs: d.jobs.map(j => j.id === adminViewJob.id ? { ...j, ...fields } : j) } : d);
+    setShowSaveToast(true); setTimeout(() => setShowSaveToast(false), 2000);
+  };
+  const adminMessageJobCreator = async () => {
+    if (!adminViewJob?.owner_id) return;
+    const body = window.prompt(`Message to the center that posted "${adminViewJob.title}":`);
+    if (!body || !body.trim()) return;
+    const { error } = await kkAdminSendUserMessage(adminViewJob.owner_id, body.trim());
+    alert(error ? `Couldn't send: ${error.message}` : 'Message sent to the center.');
+  };
+  const adminDeleteJob = async () => {
+    if (!adminViewJob) return;
+    if (!window.confirm(`Delete the job "${adminViewJob.title}"? This can't be undone.`)) return;
+    const { error } = await kkAdminDeleteJob(adminViewJob.id);
+    if (error) { alert(`Couldn't delete: ${error.message}`); return; }
+    setAdminData(d => d ? { ...d, jobs: d.jobs.filter(j => j.id !== adminViewJob.id) } : d);
+    setAdminViewJob(null);
   };
 
   // Role impersonation — admins preview the app as another role.
@@ -4144,6 +4295,27 @@ export default function App() {
               <p style={{ color: c.textMuted, fontSize: 13 }}>{userType === 'owner' ? 'Chat directly with applicants.' : 'Chat directly with daycare centers.'}</p>
             </div>
 
+            {/* Support thread from Rellim Kid Kare Konnect (admin) */}
+            {supportThread.length > 0 && (
+              <div style={{ background: c.white, border: `1.5px solid ${c.gold}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 9, background: c.navy, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Shield size={16} color={c.gold} /></div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: c.navy }}>Rellim Kid Kare Konnect Support</div>
+                </div>
+                <div style={{ maxHeight: 220, overflowY: 'auto', background: c.cream, borderRadius: 9, padding: 10, marginBottom: 10 }}>
+                  {supportThread.map(m => (
+                    <div key={m.id} style={{ display: 'flex', justifyContent: m.is_from_admin ? 'flex-start' : 'flex-end', marginBottom: 6 }}>
+                      <div style={{ maxWidth: '80%', padding: '8px 12px', borderRadius: 12, fontSize: 13, lineHeight: 1.45, background: m.is_from_admin ? c.white : c.primary, color: m.is_from_admin ? c.text : c.white, border: m.is_from_admin ? `1px solid ${c.border}` : 'none' }}>{m.body}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input value={supportDraft} onChange={e => setSupportDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendSupportReplyMsg()} placeholder="Reply to support…" style={{ flex: 1, padding: '9px 12px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, outline: 'none', background: c.white, color: c.text }} />
+                  <button onClick={sendSupportReplyMsg} style={{ padding: '9px 14px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><Send size={13} /> Send</button>
+                </div>
+              </div>
+            )}
+
             <div className="grid lg:grid-cols-3 gap-4" style={{ minHeight: 500 }}>
               {/* CONVERSATION LIST */}
               <div style={{ background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 14, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -4288,14 +4460,14 @@ export default function App() {
                     return !q || (p.name||'').toLowerCase().includes(q) || (p.email||'').toLowerCase().includes(q) || (p.center||'').toLowerCase().includes(q);
                   }).map(p => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: c.white, border: `1px solid ${c.border}`, borderRadius: 10, flexWrap: 'wrap' }}>
-                      <div style={{ minWidth: 0 }}>
+                      <button onClick={() => openAdminUser(p)} style={{ minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', flex: 1, padding: 0 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           {p.role === 'owner' ? (p.center || p.business_name || p.name || 'Center') : (p.name || 'Unnamed')}
                           {p.admin_level && p.admin_level !== 'none' && <span style={{ fontSize: 9.5, fontWeight: 800, background: p.admin_level === 'super_admin' ? c.primary : c.gold, color: p.admin_level === 'super_admin' ? c.white : c.navy, padding: '2px 6px', borderRadius: 999, textTransform: 'uppercase' }}>{p.admin_level === 'super_admin' ? 'Super' : 'Admin'}</span>}
                           {p.trusted_network && <span style={{ fontSize: 9.5, fontWeight: 800, background: c.success, color: c.white, padding: '2px 6px', borderRadius: 999, textTransform: 'uppercase' }}>Trusted</span>}
                         </div>
-                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{p.email}{p.phone ? ` · ${p.phone}` : ''}{p.city ? ` · ${p.city}` : ''}{p.years_experience ? ` · ${p.years_experience}` : ''}{p.subscription_plan ? ` · ${p.subscription_plan}` : ''}</div>
-                      </div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{p.email}{p.phone ? ` · ${p.phone}` : ''}{p.city ? ` · ${p.city}` : ''}{p.years_experience ? ` · ${p.years_experience}` : ''}{p.subscription_plan ? ` · ${p.subscription_plan}` : ''} · <span style={{ color: c.primary, fontWeight: 600 }}>Manage →</span></div>
+                      </button>
                       <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
                         {p.role === 'worker' && (
                           <button onClick={() => adminToggleTrusted(p.id, !p.trusted_network)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${p.trusted_network ? c.success : c.border}`, background: p.trusted_network ? c.success : c.white, color: p.trusted_network ? c.white : c.text }}>{p.trusted_network ? 'Trusted ✓' : 'Add to Trusted'}</button>
@@ -4312,10 +4484,10 @@ export default function App() {
                   ))}
                   {current.type === 'jobs' && current.rows.filter(j => { const q = adminUserSearch.toLowerCase(); return !q || (j.title||'').toLowerCase().includes(q) || (j.center||'').toLowerCase().includes(q); }).map(j => (
                     <div key={j.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '10px 12px', background: c.white, border: `1px solid ${c.border}`, borderRadius: 10 }}>
-                      <div style={{ minWidth: 0 }}>
+                      <button onClick={() => openAdminJob(j)} style={{ minWidth: 0, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', flex: 1, padding: 0 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 700, color: c.navy }}>{j.title} {!j.active && <span style={{ fontSize: 10, color: c.coralDark, fontWeight: 700 }}>(inactive)</span>}</div>
-                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{j.center}{j.location ? ` · ${j.location}` : ''}{j.pay ? ` · ${j.pay}` : ''} · {formatRelativeTime(j.posted_at)}</div>
-                      </div>
+                        <div style={{ fontSize: 11.5, color: c.textMuted }}>{j.center}{j.location ? ` · ${j.location}` : ''}{j.pay ? ` · ${j.pay}` : ''} · {formatRelativeTime(j.posted_at)} · <span style={{ color: c.primary, fontWeight: 600 }}>Manage →</span></div>
+                      </button>
                       <button onClick={() => adminToggleJob(j.id, !j.active)} style={{ padding: '5px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer', border: `1.5px solid ${j.active ? c.border : c.coral}`, background: j.active ? c.white : c.coralDark, color: j.active ? c.coralDark : c.white, flexShrink: 0 }}>{j.active ? 'Deactivate' : 'Reactivate'}</button>
                     </div>
                   ))}
@@ -4802,6 +4974,83 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ADMIN USER DETAIL */}
+      {adminViewUser && adminUserEdit && (
+        <Modal onClose={() => setAdminViewUser(null)} wide>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Manage User</h3>
+              <div style={{ fontSize: 12, color: c.textMuted }}>{adminViewUser.email} · <span style={{ textTransform: 'capitalize' }}>{adminViewUser.role}</span></div>
+            </div>
+            <button onClick={() => setAdminViewUser(null)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+
+          {/* Editable profile */}
+          <div style={{ fontSize: 11, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Profile</div>
+          <div className="grid sm:grid-cols-2 gap-2" style={{ marginBottom: 8 }}>
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>{adminViewUser.role === 'owner' ? 'Contact name' : 'Name'}</label><input value={adminUserEdit.name} onChange={e => setAdminUserEdit({ ...adminUserEdit, name: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Phone</label><input value={adminUserEdit.phone} onChange={e => setAdminUserEdit({ ...adminUserEdit, phone: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            {adminViewUser.role === 'owner' && <div className="sm:col-span-2"><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Center name</label><input value={adminUserEdit.center} onChange={e => setAdminUserEdit({ ...adminUserEdit, center: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>}
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>City</label><input value={adminUserEdit.city} onChange={e => setAdminUserEdit({ ...adminUserEdit, city: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Zip</label><input value={adminUserEdit.zip} onChange={e => setAdminUserEdit({ ...adminUserEdit, zip: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            {adminViewUser.role === 'worker' && <>
+              <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Years experience</label><input value={adminUserEdit.years_experience} onChange={e => setAdminUserEdit({ ...adminUserEdit, years_experience: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+              <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Background check</label><input value={adminUserEdit.bg_check} onChange={e => setAdminUserEdit({ ...adminUserEdit, bg_check: e.target.value })} style={{ width: '100%', padding: '8px 10px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            </>}
+          </div>
+          <button onClick={saveAdminUser} style={{ padding: '9px 16px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 16 }}><Check size={14} /> Save Profile</button>
+
+          {/* Support conversation */}
+          <div style={{ borderTop: `1px solid ${c.border}`, paddingTop: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Support Conversation</div>
+            <div style={{ maxHeight: 180, overflowY: 'auto', background: c.cream, borderRadius: 9, padding: 10, marginBottom: 8 }}>
+              {adminUserThread.length === 0 ? <div style={{ fontSize: 12.5, color: c.textMuted, textAlign: 'center', padding: 8 }}>No messages yet.</div> :
+                adminUserThread.map(m => (
+                  <div key={m.id} style={{ display: 'flex', justifyContent: m.is_from_admin ? 'flex-end' : 'flex-start', marginBottom: 6 }}>
+                    <div style={{ maxWidth: '80%', padding: '7px 11px', borderRadius: 12, fontSize: 12.5, background: m.is_from_admin ? c.primary : c.white, color: m.is_from_admin ? c.white : c.text, border: m.is_from_admin ? 'none' : `1px solid ${c.border}` }}>{m.body}</div>
+                  </div>
+                ))}
+            </div>
+            <div className="flex gap-2">
+              <input value={adminMsgDraft} onChange={e => setAdminMsgDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && adminSendMessage()} placeholder="Message this user…" style={{ flex: 1, padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, outline: 'none', background: c.white, color: c.text }} />
+              <button onClick={adminSendMessage} style={{ padding: '9px 14px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><Send size={13} /> Send</button>
+            </div>
+          </div>
+
+          {/* Account actions */}
+          <div style={{ borderTop: `1px solid ${c.border}`, paddingTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={adminSendResetLink} style={{ padding: '9px 14px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><KeyRound size={13} /> Send Password Reset Link</button>
+            {isSuperAdmin && (
+              <button onClick={adminDeleteUser} style={{ padding: '9px 14px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Trash2 size={13} /> Delete Account</button>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ADMIN JOB DETAIL */}
+      {adminViewJob && adminJobEdit && (
+        <Modal onClose={() => setAdminViewJob(null)}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 style={{ fontSize: 18, fontWeight: 800, color: c.navy }}>Manage Job</h3>
+            <button onClick={() => setAdminViewJob(null)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+          <div className="space-y-2" style={{ marginBottom: 14 }}>
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Title</label><input value={adminJobEdit.title} onChange={e => setAdminJobEdit({ ...adminJobEdit, title: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Pay</label><input value={adminJobEdit.pay} onChange={e => setAdminJobEdit({ ...adminJobEdit, pay: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+              <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Type</label><input value={adminJobEdit.type} onChange={e => setAdminJobEdit({ ...adminJobEdit, type: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            </div>
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Location</label><input value={adminJobEdit.location} onChange={e => setAdminJobEdit({ ...adminJobEdit, location: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text }} /></div>
+            <div><label style={{ fontSize: 11.5, fontWeight: 600, color: c.text }}>Description</label><textarea value={adminJobEdit.description} onChange={e => setAdminJobEdit({ ...adminJobEdit, description: e.target.value })} rows={3} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 8, outline: 'none', background: c.white, color: c.text, resize: 'vertical', fontFamily: 'inherit' }} /></div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={saveAdminJob} style={{ padding: '9px 16px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Check size={14} /> Save</button>
+            <button onClick={adminMessageJobCreator} style={{ padding: '9px 16px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Mail size={13} /> Message Creator</button>
+            <button onClick={adminDeleteJob} style={{ padding: '9px 16px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Trash2 size={13} /> Delete Job</button>
+          </div>
+        </Modal>
+      )}
 
       {/* ROLE PERMISSIONS — super admin controls which sections Admins see */}
       {showRolePerms && isSuperAdmin && (
