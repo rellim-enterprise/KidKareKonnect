@@ -1171,6 +1171,29 @@ export default function App() {
     })();
   }, []);
 
+  // Real-time updates: open a websocket so new messages and sub-shift
+  // activity appear instantly without a page refresh. RLS still applies,
+  // so each user only receives changes they're allowed to see.
+  useEffect(() => {
+    if (!signedIn) return;
+    const channel = supabase
+      .channel('kkk-realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
+        reloadConversations();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+        reloadConversations();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sub_requests' }, () => {
+        if (userType === 'owner' || userType === 'worker') reloadSubData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sub_offers' }, () => {
+        if (userType === 'owner') reloadSubData();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [signedIn, userType]);
+
   // Brand context for the Crisp chat widget (business name, support
   // email, support phone). Runs once on mount so every visitor — signed
   // in or not — sees consistent contact info. The values come from
