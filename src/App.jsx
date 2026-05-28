@@ -2466,7 +2466,18 @@ export default function App() {
             )}
             {signedIn ? (
               <>
-                <Avatar name={signup.name || 'T B'} photo={profile.photo} size={34} />
+                <button
+                  onClick={() => {
+                    if (userType === 'worker') { if (profileComplete) { setView('app'); setTab('myProfile'); } else { setView('profile'); } }
+                    else if (userType === 'owner') { setView('app'); setTab('myCenter'); }
+                    else if (userType === 'partner') { setView('app'); setTab('partners'); }
+                    else { setView('app'); }
+                  }}
+                  title="View my profile"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, borderRadius: '50%', display: 'flex' }}
+                >
+                  <Avatar name={signup.name || 'T B'} photo={profile.photo} size={34} />
+                </button>
                 <button onClick={signOut} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.textMuted, padding: 4 }} title="Sign out"><LogOut size={17} /></button>
               </>
             ) : (
