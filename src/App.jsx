@@ -221,6 +221,16 @@ async function kkLoadWorkerHistory(workerId) {
 }
 
 // ===================== SUBSTITUTE STAFFING =====================
+function formatShiftDate(s) {
+  if (!s) return '';
+  try { return new Date(s + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }); }
+  catch { return s; }
+}
+function shiftDatesLabel(req) {
+  const list = (req.shift_dates && req.shift_dates.length) ? req.shift_dates : (req.shift_date ? [req.shift_date] : []);
+  return list.map(formatShiftDate).join(', ');
+}
+
 async function kkCreateSubRequest(payload) {
   return supabase.from('sub_requests').insert(payload).select().single();
 }
@@ -861,7 +871,7 @@ export default function App() {
   const [availableForSub, setAvailableForSub] = useState(false);
   const [subSchedule, setSubSchedule] = useState({ days: [], from: '', until: '', note: '' });
   const [showSubRequest, setShowSubRequest] = useState(false);
-  const [subForm, setSubForm] = useState({ shift_date: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
+  const [subForm, setSubForm] = useState({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
   const [showLeaveReview, setShowLeaveReview] = useState(false);
   const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
   const [reviewError, setReviewError] = useState('');
@@ -1720,13 +1730,17 @@ export default function App() {
   }, [signedIn, userType, tab]);
 
   const postSubRequest = async () => {
-    if (!subForm.shift_date) { alert('Please pick a date for the shift.'); return; }
+    // Include any date still typed in the picker but not yet "added".
+    const allDates = Array.from(new Set([...subForm.dates, ...(subForm.dateInput ? [subForm.dateInput] : [])]));
+    if (allDates.length === 0) { alert('Please add at least one date for the shift.'); return; }
+    const sorted = [...allDates].sort();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { alert('Please sign in again.'); return; }
     const { data: row, error } = await kkCreateSubRequest({
       owner_id: user.id,
       center_name: signup.center || 'Your Center',
-      shift_date: subForm.shift_date,
+      shift_date: sorted[0],          // earliest, for sorting + NOT NULL
+      shift_dates: sorted,            // full list
       start_time: subForm.start_time || null,
       end_time: subForm.end_time || null,
       age_group: subForm.age_group || null,
@@ -1737,7 +1751,7 @@ export default function App() {
     if (error || !row) { alert(`Could not post the request: ${error?.message || 'unknown error'}`); return; }
     kkNotify({ type: 'sub_request_posted', subRequestId: row.id });
     setShowSubRequest(false);
-    setSubForm({ shift_date: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
+    setSubForm({ dates: [], dateInput: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
     await reloadSubData();
   };
 
@@ -4061,7 +4075,7 @@ export default function App() {
                   <div key={r.id} style={{ background: c.white, border: `1.5px solid ${r.status === 'filled' ? c.success : c.border}`, borderRadius: 12, padding: 16 }}>
                     <div className="flex items-start justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>{r.age_group || 'Classroom'} · {r.shift_date}</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>{r.age_group || 'Classroom'} · {shiftDatesLabel(r)}</div>
                         <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 2 }}>
                           {[r.start_time && r.end_time ? `${r.start_time} – ${r.end_time}` : null, r.pay_rate, r.location].filter(Boolean).join(' · ')}
                         </div>
@@ -4171,7 +4185,7 @@ export default function App() {
                       <div>
                         <div style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>{r.center_name || 'A Georgia center'}</div>
                         <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 3 }} className="space-y-0.5">
-                          <div className="flex items-center gap-1.5"><Calendar size={12} color={c.primary} /> {r.shift_date}{r.start_time && r.end_time ? ` · ${r.start_time} – ${r.end_time}` : ''}</div>
+                          <div className="flex items-center gap-1.5"><Calendar size={12} color={c.primary} /> {shiftDatesLabel(r)}{r.start_time && r.end_time ? ` · ${r.start_time} – ${r.end_time}` : ''}</div>
                           {r.age_group && <div className="flex items-center gap-1.5"><Users size={12} color={c.primary} /> {r.age_group}</div>}
                           {r.pay_rate && <div className="flex items-center gap-1.5"><DollarSign size={12} color={c.primary} /> {r.pay_rate}</div>}
                           {r.location && <div className="flex items-center gap-1.5"><MapPin size={12} color={c.primary} /> {r.location}</div>}
@@ -4487,16 +4501,39 @@ export default function App() {
           </div>
           <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>Available teachers get notified instantly. The first you confirm gets the shift.</p>
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Date</label>
-                <input type="date" value={subForm.shift_date} onChange={e => setSubForm({ ...subForm, shift_date: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Which day(s) do you need covered?</label>
+              <div className="flex gap-2">
+                <input type="date" value={subForm.dateInput} onChange={e => setSubForm({ ...subForm, dateInput: e.target.value })} style={{ flex: 1, padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+                <button
+                  onClick={() => { if (subForm.dateInput && !subForm.dates.includes(subForm.dateInput)) setSubForm({ ...subForm, dates: [...subForm.dates, subForm.dateInput], dateInput: '' }); }}
+                  style={{ padding: '9px 16px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+                >
+                  <Plus size={14} /> Add day
+                </button>
               </div>
+              {subForm.dates.length > 0 && (
+                <div className="flex flex-wrap gap-1.5" style={{ marginTop: 8 }}>
+                  {[...subForm.dates].sort().map(d => (
+                    <span key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', background: c.paleBlue, color: c.primaryDark, borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+                      {formatShiftDate(d)}
+                      <button onClick={() => setSubForm({ ...subForm, dates: subForm.dates.filter(x => x !== d) })} aria-label="Remove" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: c.primary, display: 'flex' }}><X size={12} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <p style={{ fontSize: 11, color: c.textMuted, marginTop: 6 }}>Add each day you need a sub. One teacher can cover the whole request — perfect for a multi-day absence.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Age group</label>
                 <select value={subForm.age_group} onChange={e => setSubForm({ ...subForm, age_group: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }}>
                   {['Infant','Toddler','Preschool','Pre-K','School Age','Any'].map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Pay rate</label>
+                <input value={subForm.pay_rate} onChange={e => setSubForm({ ...subForm, pay_rate: e.target.value })} placeholder="$16 / hr" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Start time</label>
@@ -4506,10 +4543,6 @@ export default function App() {
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>End time</label>
                 <input value={subForm.end_time} onChange={e => setSubForm({ ...subForm, end_time: e.target.value })} placeholder="3:00pm" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
               </div>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Pay rate</label>
-              <input value={subForm.pay_rate} onChange={e => setSubForm({ ...subForm, pay_rate: e.target.value })} placeholder="$16 / hr" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Location</label>
