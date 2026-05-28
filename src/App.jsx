@@ -253,7 +253,7 @@ async function kkLoadOffersForOwnerRequests(requestIds) {
   if (teacherIds.length) {
     const { data: profs } = await supabase
       .from('profiles')
-      .select('id, name, email, phone, photo_url, years_experience, credentials, bg_check, city')
+      .select('id, name, email, phone, photo_url, years_experience, credentials, bg_check, city, sub_availability')
       .in('id', teacherIds);
     profMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
   }
@@ -859,6 +859,7 @@ export default function App() {
   const [subOffersByRequest, setSubOffersByRequest] = useState({});
   const [myOfferRequestIds, setMyOfferRequestIds] = useState([]);
   const [availableForSub, setAvailableForSub] = useState(false);
+  const [subSchedule, setSubSchedule] = useState({ days: [], from: '', until: '', note: '' });
   const [showSubRequest, setShowSubRequest] = useState(false);
   const [subForm, setSubForm] = useState({ shift_date: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
   const [showLeaveReview, setShowLeaveReview] = useState(false);
@@ -1702,11 +1703,13 @@ export default function App() {
       const [open, mine, { data: prof }] = await Promise.all([
         kkLoadOpenSubRequests(),
         kkLoadMyOfferRequestIds(user.id),
-        supabase.from('profiles').select('available_for_sub').eq('id', user.id).maybeSingle(),
+        supabase.from('profiles').select('available_for_sub, sub_availability').eq('id', user.id).maybeSingle(),
       ]);
       setOpenSubRequests(open);
       setMyOfferRequestIds(mine);
       setAvailableForSub(!!prof?.available_for_sub);
+      const sched = prof?.sub_availability || {};
+      setSubSchedule({ days: sched.days || [], from: sched.from || '', until: sched.until || '', note: sched.note || '' });
     }
   };
 
@@ -1760,6 +1763,21 @@ export default function App() {
     const next = !availableForSub;
     setAvailableForSub(next);
     await supabase.from('profiles').update({ available_for_sub: next }).eq('id', user.id);
+  };
+
+  const toggleSubDay = (day) => {
+    setSubSchedule(s => ({
+      ...s,
+      days: s.days.includes(day) ? s.days.filter(d => d !== day) : [...s.days, day],
+    }));
+  };
+
+  const saveSubSchedule = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from('profiles').update({ sub_availability: subSchedule }).eq('id', user.id);
+    setShowSaveToast(true);
+    setTimeout(() => setShowSaveToast(false), 2500);
   };
 
   const saveCenterProfile = async () => {
@@ -4065,6 +4083,11 @@ export default function App() {
                               <div>
                                 <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>{o.teacher?.name || 'Teacher'}</div>
                                 <div style={{ fontSize: 11.5, color: c.textMuted }}>{[o.teacher?.years_experience, o.teacher?.city, o.teacher?.bg_check].filter(Boolean).join(' · ')}</div>
+                                {o.teacher?.sub_availability && (o.teacher.sub_availability.days?.length || o.teacher.sub_availability.from) && (
+                                  <div style={{ fontSize: 11, color: c.primary, marginTop: 2 }}>
+                                    Available: {[(o.teacher.sub_availability.days || []).join(', '), (o.teacher.sub_availability.from && o.teacher.sub_availability.until) ? `${o.teacher.sub_availability.from}–${o.teacher.sub_availability.until}` : ''].filter(Boolean).join(' · ')}
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <button onClick={() => confirmSub(o.id, r.id, o.teacher_id)} style={{ padding: '8px 14px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Confirm</button>
@@ -4099,6 +4122,42 @@ export default function App() {
                 <span style={{ position: 'absolute', top: 3, left: availableForSub ? 25 : 3, width: 24, height: 24, borderRadius: '50%', background: c.white, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
               </button>
             </div>
+
+            {/* Availability schedule — only relevant when toggled on */}
+            {availableForSub && (
+              <div style={{ background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 800, color: c.navy, marginBottom: 3 }}>My availability</div>
+                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 12 }}>Let centers know which days and hours you can pick up shifts.</p>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 6 }}>Days available</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => {
+                      const on = subSchedule.days.includes(d);
+                      return (
+                        <button key={d} onClick={() => toggleSubDay(d)} style={{ padding: '7px 12px', background: on ? c.primary : c.white, color: on ? c.white : c.text, border: `1.5px solid ${on ? c.primary : c.border}`, borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>{d}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2" style={{ marginBottom: 12 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Available from</label>
+                    <input value={subSchedule.from} onChange={e => setSubSchedule({ ...subSchedule, from: e.target.value })} placeholder="7:00am" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Until</label>
+                    <input value={subSchedule.until} onChange={e => setSubSchedule({ ...subSchedule, until: e.target.value })} placeholder="6:00pm" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Notes (optional)</label>
+                  <input value={subSchedule.note} onChange={e => setSubSchedule({ ...subSchedule, note: e.target.value })} placeholder="e.g. Prefer toddler rooms; can travel up to 20 min" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+                </div>
+                <button onClick={saveSubSchedule} style={{ padding: '10px 16px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Check size={14} /> Save Availability
+                </button>
+              </div>
+            )}
             <div className="space-y-3">
               {openSubRequests.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 36, background: c.white, border: `1px dashed ${c.border}`, borderRadius: 12, color: c.textMuted, fontSize: 13.5 }}>
