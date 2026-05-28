@@ -3946,7 +3946,7 @@ export default function App() {
             <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
               <div>
                 <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>
-                  {signedIn && userType === 'owner' ? 'My Job Posts' : signedIn && profileComplete ? `Jobs in ${profile.state}` : 'Browse Jobs'}
+                  {signedIn && userType === 'owner' ? 'My Job Posts' : 'Jobs in Georgia'}
                 </h2>
                 <p style={{ color: c.textMuted, fontSize: 13 }}>
                   {(() => {
