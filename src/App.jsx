@@ -7,7 +7,7 @@ import {
   Clock, DollarSign, X, Plus, FileText, ExternalLink,
   LogOut, Bookmark, LayoutGrid, CheckCircle2, Lock, Verified,
   AlertCircle, Edit3, Upload, Paperclip, Handshake, Megaphone,
-  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff, Circle, Star
+  Phone, Mail, Trash2, Camera, ChevronLeft, Calendar, KeyRound, MessageCircle, Eye, EyeOff, Circle, Star, Globe
 } from 'lucide-react';
 
 const c = {
@@ -48,7 +48,7 @@ const SAMPLE_JOBS = [
 ];
 
 const STATE_LICENSING = {
-  Georgia: { agency: 'Bright from the Start: Georgia DECAL', website: 'decal.ga.gov', requirements: ['Be at least 18 years of age','HS diploma or GED for lead teachers','10 hours preservice training through DECAL','CPR and First Aid within 90 days','Pass Criminal Records Check (CRC)','TB risk assessment','10 hours annual continuing education'], backgroundCheck: { name: 'Georgia Criminal Records Check (CRC)', steps: ['Create an account at the GA CRC portal through DECAL','Submit fingerprints at Cogent or IdentoGO','Pay the fee (approximately $50)','Wait 7 to 14 business days','Receive your CRC determination letter'], link: 'decal.ga.gov' } },
+  Georgia: { agency: 'Bright from the Start: Georgia DECAL', website: 'decal.ga.gov', requirements: ['Be at least 18 years of age','HS diploma or GED for lead teachers','10 hours preservice training through DECAL','CPR and First Aid within 90 days','Pass Criminal Records Check (CRC)','TB risk assessment','10 hours annual continuing education'], backgroundCheck: { name: 'Georgia Criminal Records Check (CRC)', steps: ['Create an account at the GA CRC portal through DECAL','Submit fingerprints at Cogent or IdentoGO','Receive your CRC determination letter'], link: 'decal.ga.gov' }, contacts: { website: 'www.decal.ga.gov', phone: '1-855-884-7444', email: 'crc@decal.ga.gov', outOfStateEmail: 'outofstate@decal.ga.gov', fax: '404-232-1999' } },
   Florida: { agency: 'Florida Department of Children and Families', website: 'myflfamilies.com', requirements: ['Be at least 18 years of age','Complete the FL 45 hour Introductory Training','Pass Level 2 background screening','10 hours annual in service training','CPR and First Aid recommended'], backgroundCheck: { name: 'Florida Level 2 Background Screening', steps: ['Get a Livescan service code','Schedule fingerprinting','Pay the fee (approximately $76)','Results sent to DCF','Clearance typically within 5 business days'], link: 'myflfamilies.com' } },
   Texas: { agency: 'Texas Health and Human Services', website: 'hhs.texas.gov', requirements: ['Be at least 18 years of age','HS diploma or GED','8 hours of preservice training','24 hours of annual training','CPR and First Aid certification','Pass Texas DFPS background check'], backgroundCheck: { name: 'Texas DFPS Background Check', steps: ['Submit application through employer','Complete fingerprint based FBI check','Pay the fee (approximately $40)','Results in 2 to 3 weeks','Eligibility determination issued'], link: 'hhs.texas.gov' } }
 };
@@ -683,7 +683,7 @@ async function kkLoadConversationsForUser(userId) {
       ownerId: c.owner_id,
       participants: [
         { email: w.email || '', name: w.name || 'Worker', role: 'worker', photo: w.photo_url || '', center: '' },
-        { email: o.email || '', name: o.name || 'Owner', role: 'owner', photo: o.photo_url || '', center: o.center || o.business_name || '' },
+        { email: o.email || '', name: o.center || o.business_name || o.name || 'Center', role: 'owner', photo: o.photo_url || '', center: o.center || o.business_name || '' },
       ],
       messages: (msgsByConv[c.id] || []).map(m => ({
         from: m.sender_id === c.worker_id ? (w.email || 'worker') : (o.email || 'owner'),
@@ -798,6 +798,8 @@ export default function App() {
   const [myWorkerHistory, setMyWorkerHistory] = useState(null);
   const [myWorkerReviews, setMyWorkerReviews] = useState([]);
   const [monthlyJobCount, setMonthlyJobCount] = useState(0);
+  // Center (owner) profile fields beyond the basics already in `signup`.
+  const [centerProfile, setCenterProfile] = useState({ address: '', qualityRated: false, qualityRatedStars: 0, hours: '' });
   const [showLeaveReview, setShowLeaveReview] = useState(false);
   const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
   const [reviewError, setReviewError] = useState('');
@@ -1600,6 +1602,54 @@ export default function App() {
     })();
   }, [signedIn, userType, posted.length]);
 
+  // Load the owner's center profile (address, quality rated, hours) so
+  // the My Center editor shows their saved data across devices.
+  useEffect(() => {
+    if (!signedIn || userType !== 'owner') return;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await kkLoadProfile(user.id);
+      if (data) {
+        setCenterProfile({
+          address: data.center_address || '',
+          qualityRated: !!data.quality_rated,
+          qualityRatedStars: data.quality_rated_stars || 0,
+          hours: data.hours_of_operation || '',
+        });
+        // Keep the business name + phone in signup state in sync too
+        setSignup(s => ({
+          ...s,
+          center: data.center || data.business_name || s.center,
+          phone: data.phone || s.phone,
+        }));
+      }
+    })();
+  }, [signedIn, userType]);
+
+  const saveCenterProfile = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { alert('Please sign in again.'); return; }
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        center: signup.center || null,
+        business_name: signup.center || null,
+        phone: signup.phone || null,
+        center_address: centerProfile.address || null,
+        quality_rated: centerProfile.qualityRated,
+        quality_rated_stars: centerProfile.qualityRated ? (centerProfile.qualityRatedStars || null) : null,
+        hours_of_operation: centerProfile.hours || null,
+      })
+      .eq('id', user.id);
+    if (error) {
+      alert(`Couldn't save your center profile: ${error.message}`);
+      return;
+    }
+    setShowSaveToast(true);
+    setTimeout(() => setShowSaveToast(false), 2500);
+  };
+
   const submitReview = async () => {
     setReviewError('');
     if (!viewingApplicantDetail) return;
@@ -1784,6 +1834,39 @@ export default function App() {
     setTab('messages');
   };
 
+  // One-click interview request: opens (or reuses) the conversation with
+  // an applicant and sends a polished, professional interview invitation
+  // offering phone / video / in-person and asking for their availability.
+  const requestInterview = async (applicant, job) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { alert('Please sign in again.'); return; }
+    let otherUserId = applicant.userId;
+    if (!otherUserId && applicant.email) {
+      const { data: row } = await supabase.from('profiles').select('id').eq('email', applicant.email).maybeSingle();
+      otherUserId = row?.id;
+    }
+    if (!otherUserId) { alert('Could not find this applicant to message.'); return; }
+    const centerName = signup.center || 'our center';
+    const firstName = (applicant.name || '').split(' ')[0] || 'there';
+    const { data: conv, error } = await kkGetOrCreateConversation({
+      workerId: otherUserId,
+      ownerId: user.id,
+      jobId: job.id,
+      jobTitle: job.title,
+    });
+    if (error || !conv) { alert(`Could not start the conversation: ${error?.message || 'unknown error'}`); return; }
+    const msg = `Hi ${firstName}, thank you for applying to our ${job.title} position at ${centerName}. We'd love to set up an interview — would a phone call, a video call (Zoom), or an in-person visit work best for you? Please reply with a few days and times that fit your schedule and we'll confirm. We look forward to speaking with you!`;
+    const { error: msgErr } = await kkSendMessage({ conversationId: conv.id, body: msg });
+    if (msgErr) { alert(`Could not send the interview request: ${msgErr.message}`); return; }
+    kkNotify({ type: 'new_message', conversationId: conv.id });
+    await reloadConversations();
+    setViewingApplicantsFor(null);
+    setViewingApplicantDetail(null);
+    setActiveConvId(conv.id);
+    setTab('messages');
+    setView('app');
+  };
+
   const sendMessage = async (convId, text) => {
     if (!text || !text.trim()) return;
     const trimmed = text.trim();
@@ -1873,6 +1956,7 @@ export default function App() {
     if (!signedIn || userType === 'owner') base.splice(1, 0, { id: 'templates', label: 'Job Templates', icon: LayoutGrid });
     if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'messages', label: 'Messages', icon: Mail, badge: myUnreadCount });
     if (signedIn && userType === 'worker' && profileComplete) base.push({ id: 'myProfile', label: 'My Profile', icon: User });
+    if (signedIn && userType === 'owner') base.push({ id: 'myCenter', label: 'My Center', icon: Building2 });
     return base;
   };
 
@@ -3617,6 +3701,40 @@ export default function App() {
                     </li>
                   ))}
                 </ol>
+
+                {/* Official state agency contacts (public info, neutral resource) */}
+                {info.contacts && (
+                  <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.15)' }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: c.gold, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 9 }}>Contact the Licensing Agency</div>
+                    <div className="space-y-2" style={{ fontSize: 11.5 }}>
+                      {info.contacts.website && (
+                        <a href={`https://${info.contacts.website.replace(/^www\./, 'www.')}`} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.92)', textDecoration: 'none' }}>
+                          <Globe size={13} color={c.gold} /> {info.contacts.website}
+                        </a>
+                      )}
+                      {info.contacts.phone && (
+                        <a href={`tel:${info.contacts.phone.replace(/[^0-9+]/g, '')}`} style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.92)', textDecoration: 'none' }}>
+                          <Phone size={13} color={c.gold} /> {info.contacts.phone}
+                        </a>
+                      )}
+                      {info.contacts.email && (
+                        <a href={`mailto:${info.contacts.email}`} style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.92)', textDecoration: 'none' }}>
+                          <Mail size={13} color={c.gold} /> {info.contacts.email} <span style={{ color: 'rgba(255,255,255,0.6)' }}>· questions</span>
+                        </a>
+                      )}
+                      {info.contacts.outOfStateEmail && (
+                        <a href={`mailto:${info.contacts.outOfStateEmail}`} style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.92)', textDecoration: 'none' }}>
+                          <Mail size={13} color={c.gold} /> {info.contacts.outOfStateEmail} <span style={{ color: 'rgba(255,255,255,0.6)' }}>· out of state</span>
+                        </a>
+                      )}
+                      {info.contacts.fax && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,0.92)' }}>
+                          <FileText size={13} color={c.gold} /> {info.contacts.fax} <span style={{ color: 'rgba(255,255,255,0.6)' }}>· fax</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3767,6 +3885,55 @@ export default function App() {
         )}
 
         {/* MY PROFILE - workers can edit their saved profile */}
+        {tab === 'myCenter' && signedIn && userType === 'owner' && (
+          <div style={{ maxWidth: 640 }}>
+            <div className="mb-4">
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>My Center</h2>
+              <p style={{ color: c.textMuted, fontSize: 13 }}>This information helps teachers learn about your center. It appears on your job posts and profile.</p>
+            </div>
+            <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 20 }} className="space-y-4">
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Business name</label>
+                <input value={signup.center} onChange={e => setSignup({ ...signup, center: e.target.value })} placeholder="Little Leaders Academy" style={{ width: '100%', padding: '10px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Address</label>
+                <input value={centerProfile.address} onChange={e => setCenterProfile({ ...centerProfile, address: e.target.value })} placeholder="123 Main St, Atlanta, GA 30301" style={{ width: '100%', padding: '10px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Phone number</label>
+                <input value={signup.phone} onChange={e => setSignup({ ...signup, phone: e.target.value })} placeholder="(404) 555-0100" style={{ width: '100%', padding: '10px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 5 }}>Hours of operation</label>
+                <input value={centerProfile.hours} onChange={e => setCenterProfile({ ...centerProfile, hours: e.target.value })} placeholder="Mon–Fri, 6:30am – 6:30pm" style={{ width: '100%', padding: '10px 12px', fontSize: 13.5, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+              <div style={{ borderTop: `1px solid ${c.border}`, paddingTop: 16 }}>
+                <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: c.text, marginBottom: 8 }}>Are you Quality Rated?</label>
+                <div className="flex gap-2" style={{ marginBottom: centerProfile.qualityRated ? 14 : 0 }}>
+                  <button onClick={() => setCenterProfile({ ...centerProfile, qualityRated: true })} style={{ flex: 1, padding: '10px', background: centerProfile.qualityRated ? c.primary : c.white, color: centerProfile.qualityRated ? c.white : c.text, border: `1.5px solid ${centerProfile.qualityRated ? c.primary : c.border}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Yes</button>
+                  <button onClick={() => setCenterProfile({ ...centerProfile, qualityRated: false, qualityRatedStars: 0 })} style={{ flex: 1, padding: '10px', background: !centerProfile.qualityRated ? c.primary : c.white, color: !centerProfile.qualityRated ? c.white : c.text, border: `1.5px solid ${!centerProfile.qualityRated ? c.primary : c.border}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>No / Not yet</button>
+                </div>
+                {centerProfile.qualityRated && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.textMuted, marginBottom: 6 }}>How many stars? (Georgia Quality Rated is 1–3 stars)</label>
+                    <div className="flex gap-2">
+                      {[1, 2, 3].map(n => (
+                        <button key={n} onClick={() => setCenterProfile({ ...centerProfile, qualityRatedStars: n })} style={{ flex: 1, padding: '10px', background: centerProfile.qualityRatedStars === n ? c.gold : c.white, color: centerProfile.qualityRatedStars === n ? c.navy : c.text, border: `1.5px solid ${centerProfile.qualityRatedStars === n ? c.gold : c.border}`, borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                          {n} <Star size={12} fill={centerProfile.qualityRatedStars === n ? c.navy : 'transparent'} color={centerProfile.qualityRatedStars === n ? c.navy : c.textMuted} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button onClick={saveCenterProfile} style={{ width: '100%', padding: '12px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                <Check size={15} /> Save Center Profile
+              </button>
+            </div>
+          </div>
+        )}
+
         {tab === 'myProfile' && signedIn && userType === 'worker' && (
           <div>
             <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
@@ -4395,6 +4562,7 @@ export default function App() {
               )}
 
               <div className="flex gap-2 pt-4 flex-wrap" style={{ borderTop: `1px solid ${c.border}` }}>
+                <button onClick={() => requestInterview(viewingApplicantDetail, viewingApplicantsFor)} style={{ padding: '10px 18px', background: c.gold, color: c.navy, border: 'none', borderRadius: 9, fontSize: 13, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Calendar size={13} /> Request Interview</button>
                 <button onClick={() => {
                   startOrOpenConversation({
                     userId: viewingApplicantDetail.userId,
