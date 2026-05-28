@@ -220,6 +220,59 @@ async function kkLoadWorkerHistory(workerId) {
   };
 }
 
+// ===================== SUBSTITUTE STAFFING =====================
+async function kkCreateSubRequest(payload) {
+  return supabase.from('sub_requests').insert(payload).select().single();
+}
+async function kkLoadOwnerSubRequests(ownerId) {
+  const { data } = await supabase
+    .from('sub_requests').select('*').eq('owner_id', ownerId)
+    .order('created_at', { ascending: false });
+  return data || [];
+}
+async function kkLoadOpenSubRequests() {
+  const { data } = await supabase
+    .from('sub_requests').select('*').eq('status', 'open')
+    .order('shift_date', { ascending: true });
+  return data || [];
+}
+async function kkCreateSubOffer(subRequestId, teacherId) {
+  return supabase.from('sub_offers')
+    .insert({ sub_request_id: subRequestId, teacher_id: teacherId })
+    .select().single();
+}
+async function kkLoadMyOfferRequestIds(teacherId) {
+  const { data } = await supabase.from('sub_offers').select('sub_request_id').eq('teacher_id', teacherId);
+  return (data || []).map(o => o.sub_request_id);
+}
+async function kkLoadOffersForOwnerRequests(requestIds) {
+  if (!requestIds || requestIds.length === 0) return {};
+  const { data: offers } = await supabase.from('sub_offers').select('*').in('sub_request_id', requestIds);
+  const teacherIds = Array.from(new Set((offers || []).map(o => o.teacher_id)));
+  let profMap = {};
+  if (teacherIds.length) {
+    const { data: profs } = await supabase
+      .from('profiles')
+      .select('id, name, email, phone, photo_url, years_experience, credentials, bg_check, city')
+      .in('id', teacherIds);
+    profMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+  }
+  const grouped = {};
+  for (const o of offers || []) {
+    if (!grouped[o.sub_request_id]) grouped[o.sub_request_id] = [];
+    grouped[o.sub_request_id].push({ ...o, teacher: profMap[o.teacher_id] || null });
+  }
+  return grouped;
+}
+async function kkConfirmSubOffer(offerId, subRequestId, teacherId) {
+  // Confirm this offer, mark the request filled, decline the rest.
+  const { error: e1 } = await supabase.from('sub_offers').update({ status: 'confirmed' }).eq('id', offerId);
+  if (e1) return { error: e1 };
+  await supabase.from('sub_offers').update({ status: 'declined' }).eq('sub_request_id', subRequestId).neq('id', offerId);
+  const { error: e2 } = await supabase.from('sub_requests').update({ status: 'filled', filled_teacher_id: teacherId }).eq('id', subRequestId);
+  return { error: e2 };
+}
+
 // Fire-and-forget email notification via the send-notification Edge
 // Function. Never blocks or throws into the UI — if it fails, the action
 // the user took still succeeds; they just don't get the email.
@@ -800,6 +853,14 @@ export default function App() {
   const [monthlyJobCount, setMonthlyJobCount] = useState(0);
   // Center (owner) profile fields beyond the basics already in `signup`.
   const [centerProfile, setCenterProfile] = useState({ address: '', qualityRated: false, qualityRatedStars: 0, hours: '' });
+  // Substitute staffing
+  const [ownerSubRequests, setOwnerSubRequests] = useState([]);
+  const [openSubRequests, setOpenSubRequests] = useState([]);
+  const [subOffersByRequest, setSubOffersByRequest] = useState({});
+  const [myOfferRequestIds, setMyOfferRequestIds] = useState([]);
+  const [availableForSub, setAvailableForSub] = useState(false);
+  const [showSubRequest, setShowSubRequest] = useState(false);
+  const [subForm, setSubForm] = useState({ shift_date: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
   const [showLeaveReview, setShowLeaveReview] = useState(false);
   const [reviewDraft, setReviewDraft] = useState({ rating: 5, comment: '' });
   const [reviewError, setReviewError] = useState('');
@@ -1627,6 +1688,80 @@ export default function App() {
     })();
   }, [signedIn, userType]);
 
+  // Load sub-staffing data: owners get their requests + offers; workers
+  // get open requests + their availability flag + which they've offered on.
+  const reloadSubData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    if (userType === 'owner') {
+      const reqs = await kkLoadOwnerSubRequests(user.id);
+      setOwnerSubRequests(reqs);
+      const offers = await kkLoadOffersForOwnerRequests(reqs.map(r => r.id));
+      setSubOffersByRequest(offers);
+    } else if (userType === 'worker') {
+      const [open, mine, { data: prof }] = await Promise.all([
+        kkLoadOpenSubRequests(),
+        kkLoadMyOfferRequestIds(user.id),
+        supabase.from('profiles').select('available_for_sub').eq('id', user.id).maybeSingle(),
+      ]);
+      setOpenSubRequests(open);
+      setMyOfferRequestIds(mine);
+      setAvailableForSub(!!prof?.available_for_sub);
+    }
+  };
+
+  useEffect(() => {
+    if (signedIn && (userType === 'owner' || userType === 'worker') && tab === 'subs') {
+      reloadSubData();
+    }
+  }, [signedIn, userType, tab]);
+
+  const postSubRequest = async () => {
+    if (!subForm.shift_date) { alert('Please pick a date for the shift.'); return; }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { alert('Please sign in again.'); return; }
+    const { data: row, error } = await kkCreateSubRequest({
+      owner_id: user.id,
+      center_name: signup.center || 'Your Center',
+      shift_date: subForm.shift_date,
+      start_time: subForm.start_time || null,
+      end_time: subForm.end_time || null,
+      age_group: subForm.age_group || null,
+      pay_rate: subForm.pay_rate || null,
+      location: subForm.location || centerProfile.address || null,
+      notes: subForm.notes || null,
+    });
+    if (error || !row) { alert(`Could not post the request: ${error?.message || 'unknown error'}`); return; }
+    kkNotify({ type: 'sub_request_posted', subRequestId: row.id });
+    setShowSubRequest(false);
+    setSubForm({ shift_date: '', start_time: '', end_time: '', age_group: 'Toddler', pay_rate: '', location: '', notes: '' });
+    await reloadSubData();
+  };
+
+  const offerToCover = async (subRequestId) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { alert('Please sign in again.'); return; }
+    const { error } = await kkCreateSubOffer(subRequestId, user.id);
+    if (error) { alert(`Could not send your offer: ${error.message}`); return; }
+    kkNotify({ type: 'sub_offer', subRequestId });
+    setMyOfferRequestIds(ids => [...ids, subRequestId]);
+  };
+
+  const confirmSub = async (offerId, subRequestId, teacherId) => {
+    const { error } = await kkConfirmSubOffer(offerId, subRequestId, teacherId);
+    if (error) { alert(`Could not confirm: ${error.message}`); return; }
+    kkNotify({ type: 'sub_confirmed', subRequestId, teacherId });
+    await reloadSubData();
+  };
+
+  const toggleSubAvailability = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const next = !availableForSub;
+    setAvailableForSub(next);
+    await supabase.from('profiles').update({ available_for_sub: next }).eq('id', user.id);
+  };
+
   const saveCenterProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { alert('Please sign in again.'); return; }
@@ -1954,6 +2089,7 @@ export default function App() {
       { id: 'partners', label: 'Partners', icon: Handshake }
     ];
     if (!signedIn || userType === 'owner') base.splice(1, 0, { id: 'templates', label: 'Job Templates', icon: LayoutGrid });
+    if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'subs', label: 'Sub Shifts', icon: Calendar });
     if (signedIn && (userType === 'worker' || userType === 'owner')) base.splice(1, 0, { id: 'messages', label: 'Messages', icon: Mail, badge: myUnreadCount });
     if (signedIn && userType === 'worker' && profileComplete) base.push({ id: 'myProfile', label: 'My Profile', icon: User });
     if (signedIn && userType === 'owner') base.push({ id: 'myCenter', label: 'My Center', icon: Building2 });
@@ -3885,6 +4021,117 @@ export default function App() {
         )}
 
         {/* MY PROFILE - workers can edit their saved profile */}
+        {tab === 'subs' && signedIn && userType === 'owner' && (
+          <div>
+            <div className="flex items-start justify-between mb-2 flex-wrap gap-3">
+              <div>
+                <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>Sub Shifts</h2>
+                <p style={{ color: c.textMuted, fontSize: 13 }}>Need a substitute fast? Post a shift and available teachers are notified instantly.</p>
+              </div>
+              <button onClick={() => setShowSubRequest(true)} style={{ padding: '11px 18px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 10, fontSize: 13.5, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Plus size={15} /> I Need a Sub Today
+              </button>
+            </div>
+            <div className="space-y-3" style={{ marginTop: 16 }}>
+              {ownerSubRequests.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 36, background: c.white, border: `1px dashed ${c.border}`, borderRadius: 12, color: c.textMuted, fontSize: 13.5 }}>
+                  No sub requests yet. When a teacher calls out, tap <strong>“I Need a Sub Today”</strong> and we'll alert qualified, available teachers right away.
+                </div>
+              ) : ownerSubRequests.map(r => {
+                const offers = subOffersByRequest[r.id] || [];
+                return (
+                  <div key={r.id} style={{ background: c.white, border: `1.5px solid ${r.status === 'filled' ? c.success : c.border}`, borderRadius: 12, padding: 16 }}>
+                    <div className="flex items-start justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>{r.age_group || 'Classroom'} · {r.shift_date}</div>
+                        <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 2 }}>
+                          {[r.start_time && r.end_time ? `${r.start_time} – ${r.end_time}` : null, r.pay_rate, r.location].filter(Boolean).join(' · ')}
+                        </div>
+                        {r.notes && <div style={{ fontSize: 12.5, color: c.text, marginTop: 4, fontStyle: 'italic' }}>"{r.notes}"</div>}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 999, background: r.status === 'filled' ? c.success : (r.status === 'open' ? c.gold : c.border), color: r.status === 'filled' ? c.white : c.navy, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {r.status === 'filled' ? 'Filled' : r.status}
+                      </span>
+                    </div>
+                    {r.status === 'open' && (
+                      <div style={{ borderTop: `1px solid ${c.borderSoft}`, paddingTop: 10, marginTop: 6 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                          {offers.length === 0 ? 'Waiting for teachers to respond…' : `${offers.length} teacher${offers.length === 1 ? '' : 's'} available`}
+                        </div>
+                        {offers.map(o => (
+                          <div key={o.id} className="flex items-center justify-between gap-2" style={{ padding: '8px 0' }}>
+                            <div className="flex items-center gap-2.5">
+                              <Avatar name={o.teacher?.name || '?'} photo={o.teacher?.photo_url} size={34} />
+                              <div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: c.navy }}>{o.teacher?.name || 'Teacher'}</div>
+                                <div style={{ fontSize: 11.5, color: c.textMuted }}>{[o.teacher?.years_experience, o.teacher?.city, o.teacher?.bg_check].filter(Boolean).join(' · ')}</div>
+                              </div>
+                            </div>
+                            <button onClick={() => confirmSub(o.id, r.id, o.teacher_id)} style={{ padding: '8px 14px', background: c.primary, color: c.white, border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Confirm</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {r.status === 'filled' && (
+                      <div style={{ borderTop: `1px solid ${c.borderSoft}`, paddingTop: 10, marginTop: 6, fontSize: 12.5, color: c.success, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <CheckCircle2 size={14} /> Covered — the teacher has been notified.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {tab === 'subs' && signedIn && userType === 'worker' && (
+          <div>
+            <div className="mb-3">
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>Sub Shifts</h2>
+              <p style={{ color: c.textMuted, fontSize: 13 }}>Pick up open substitute shifts at Georgia centers. Get paid, build your reputation, help a classroom stay open.</p>
+            </div>
+            <div style={{ background: availableForSub ? '#EAF6EE' : c.white, border: `1.5px solid ${availableForSub ? c.success : c.border}`, borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: c.navy }}>Available for substitute shifts</div>
+                <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 2 }}>{availableForSub ? "You're on the list — we'll email you when a shift opens up." : 'Turn this on to get notified when centers need a sub.'}</div>
+              </div>
+              <button onClick={toggleSubAvailability} style={{ flexShrink: 0, width: 52, height: 30, borderRadius: 999, background: availableForSub ? c.success : c.border, border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s' }}>
+                <span style={{ position: 'absolute', top: 3, left: availableForSub ? 25 : 3, width: 24, height: 24, borderRadius: '50%', background: c.white, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+              </button>
+            </div>
+            <div className="space-y-3">
+              {openSubRequests.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 36, background: c.white, border: `1px dashed ${c.border}`, borderRadius: 12, color: c.textMuted, fontSize: 13.5 }}>
+                  No open sub shifts right now. Keep your availability on and we'll email you the moment a center needs coverage.
+                </div>
+              ) : openSubRequests.map(r => {
+                const offered = myOfferRequestIds.includes(r.id);
+                return (
+                  <div key={r.id} style={{ background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 12, padding: 16 }}>
+                    <div className="flex items-start justify-between flex-wrap gap-2">
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: c.navy }}>{r.center_name || 'A Georgia center'}</div>
+                        <div style={{ fontSize: 12.5, color: c.textMuted, marginTop: 3 }} className="space-y-0.5">
+                          <div className="flex items-center gap-1.5"><Calendar size={12} color={c.primary} /> {r.shift_date}{r.start_time && r.end_time ? ` · ${r.start_time} – ${r.end_time}` : ''}</div>
+                          {r.age_group && <div className="flex items-center gap-1.5"><Users size={12} color={c.primary} /> {r.age_group}</div>}
+                          {r.pay_rate && <div className="flex items-center gap-1.5"><DollarSign size={12} color={c.primary} /> {r.pay_rate}</div>}
+                          {r.location && <div className="flex items-center gap-1.5"><MapPin size={12} color={c.primary} /> {r.location}</div>}
+                        </div>
+                        {r.notes && <div style={{ fontSize: 12.5, color: c.text, marginTop: 6, fontStyle: 'italic' }}>"{r.notes}"</div>}
+                      </div>
+                      {offered ? (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: c.success, display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}><CheckCircle2 size={14} /> Offer sent</span>
+                      ) : (
+                        <button onClick={() => offerToCover(r.id)} style={{ padding: '9px 15px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>I can cover this</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {tab === 'myCenter' && signedIn && userType === 'owner' && (
           <div style={{ maxWidth: 640 }}>
             <div className="mb-4">
@@ -4171,6 +4418,54 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* POST SUB REQUEST */}
+      {showSubRequest && (
+        <Modal onClose={() => setShowSubRequest(false)}>
+          <div className="flex items-center justify-between mb-1">
+            <h3 style={{ fontSize: 19, fontWeight: 800, color: c.navy }}>Request a Substitute</h3>
+            <button onClick={() => setShowSubRequest(false)} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X size={18} /></button>
+          </div>
+          <p style={{ fontSize: 12.5, color: c.textMuted, marginBottom: 16, lineHeight: 1.5 }}>Available teachers get notified instantly. The first you confirm gets the shift.</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Date</label>
+                <input type="date" value={subForm.shift_date} onChange={e => setSubForm({ ...subForm, shift_date: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Age group</label>
+                <select value={subForm.age_group} onChange={e => setSubForm({ ...subForm, age_group: e.target.value })} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }}>
+                  {['Infant','Toddler','Preschool','Pre-K','School Age','Any'].map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Start time</label>
+                <input value={subForm.start_time} onChange={e => setSubForm({ ...subForm, start_time: e.target.value })} placeholder="7:00am" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>End time</label>
+                <input value={subForm.end_time} onChange={e => setSubForm({ ...subForm, end_time: e.target.value })} placeholder="3:00pm" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+              </div>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Pay rate</label>
+              <input value={subForm.pay_rate} onChange={e => setSubForm({ ...subForm, pay_rate: e.target.value })} placeholder="$16 / hr" style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Location</label>
+              <input value={subForm.location} onChange={e => setSubForm({ ...subForm, location: e.target.value })} placeholder={centerProfile.address || 'Center address'} style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: c.text, marginBottom: 4 }}>Notes (optional)</label>
+              <textarea value={subForm.notes} onChange={e => setSubForm({ ...subForm, notes: e.target.value })} rows={2} placeholder="e.g. Lead teacher out sick, need coverage for the toddler room." style={{ width: '100%', padding: '9px 11px', fontSize: 13, border: `1.5px solid ${c.border}`, borderRadius: 9, background: c.white, color: c.text, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }} />
+            </div>
+            <button onClick={postSubRequest} style={{ width: '100%', padding: '12px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <Send size={14} /> Send to Available Teachers
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {/* POST JOB */}
       {showPost && (
