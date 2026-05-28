@@ -220,6 +220,25 @@ async function kkLoadWorkerHistory(workerId) {
   };
 }
 
+// Fire-and-forget email notification via the send-notification Edge
+// Function. Never blocks or throws into the UI — if it fails, the action
+// the user took still succeeds; they just don't get the email.
+async function kkNotify(payload) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    const base = (import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 'https://vennbviwdmcyhcmwdncd.supabase.co';
+    await fetch(`${base}/functions/v1/send-notification`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (_) { /* non-fatal — notifications are best-effort */ }
+}
+
 async function kkInsertReview({ applicationId, workerId, ownerId, rating, comment }) {
   return supabase.from('reviews').insert({
     application_id: applicationId,
@@ -1131,13 +1150,17 @@ export default function App() {
     if (isReal) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setAuthPromptJob(job); return; }
-      const { error } = await supabase
+      const { data: inserted, error } = await supabase
         .from('applications')
-        .insert({ job_id: job.id, worker_id: user.id });
+        .insert({ job_id: job.id, worker_id: user.id })
+        .select('id')
+        .single();
       if (error) {
         alert(`Could not submit your application: ${error.message}`);
         return;
       }
+      // Email the owner that they have a new applicant.
+      if (inserted?.id) kkNotify({ type: 'new_application', applicationId: inserted.id });
     }
     const nextApplied = [...applied, job.id];
     const snap = { name: signup.name || 'You', email: signup.email, phone: signup.phone, photo: profile.photo, ...profile, appliedDate: 'Just now' };
@@ -1694,6 +1717,8 @@ export default function App() {
       alert(`Couldn't update stage: ${error.message}`);
       return;
     }
+    // Email the applicant that their status changed (interview/hired/etc).
+    kkNotify({ type: 'stage_change', applicationId: appId, newStage: newStatus });
     // Reflect locally without a full refetch
     setJobApplicants(prev => {
       const updated = { ...prev };
@@ -1768,6 +1793,8 @@ export default function App() {
       alert(`Couldn't send message: ${error.message}`);
       return;
     }
+    // Email the other participant that they have a new message.
+    kkNotify({ type: 'new_message', conversationId: convId });
     await reloadConversations();
   };
 
