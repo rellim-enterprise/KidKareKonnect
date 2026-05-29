@@ -476,42 +476,40 @@ function calculateReadinessScore(profile, history = {}) {
   const hasAgeGroups = (profile.ageGroups || []).length > 0;
   const profileComplete = filledCount === completeFields.length && hasPositions && hasAgeGroups;
 
+  // Background Check — tiered: Portable (20) > Cleared/current (15) >
+  // In progress (8) > None (0).
   const bg = (profile.bgCheck || '').toLowerCase();
   const portableBg = bg.includes('portable');
-  const anyBg = bg && !bg.includes('not started');
+  const clearedBg = bg.includes('cleared') || bg.includes('current') || bg.includes('complete');
+  const inProgressBg = bg.includes('progress') || bg.includes('pending');
+  const bgScore = portableBg ? 20 : clearedBg ? 15 : inProgressBg ? 8 : 0;
 
   const creds = (profile.credentials || []).map(s => s.toLowerCase());
   const credFiles = (profile.credentialFiles || []).map(s => s.toLowerCase());
   const hasCpr = creds.some(s => s.includes('cpr')) || credFiles.some(s => s.includes('cpr'));
   const hasCda = creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
-  const hasOtherCred = (profile.credentials || []).length > 0 || (profile.education && profile.education !== 'Some College');
 
-  // Reputation-based — pulled from history when available, otherwise default.
-  const responseRateScore = history.fastResponseRate ? Math.round(history.fastResponseRate * 10) : 0;
-  const completedShifts = history.completedShifts || 0;
-  const completedShiftsScore = Math.min(10, Math.floor(completedShifts / 3) * 2);
-  const noShows = history.noShows || 0;
-  const noShowScore = noShows === 0 ? 5 : noShows === 1 ? 3 : 0;
+  // Education level — broken into degree tiers.
+  const edu = (profile.education || '').toLowerCase();
+  const eduScore = (edu.includes('bachelor') || edu.includes('master') || edu.includes('doctora'))
+    ? 18 : edu.includes('associate') ? 12 : edu.includes('some college') ? 6 : 0;
 
-  // Two components that replace the (platform-dependent) Positive
-  // Employer Reviews slot. References = 7, Training Certificates = 8,
-  // total 15 — preserving the original 100-point ceiling.
+  // Professional references — partial credit for 1 or 2, full at 3.
   const refCount = (profile.references || []).length;
   const refsScore = refCount >= 3 ? 7 : refCount === 2 ? 5 : refCount === 1 ? 2 : 0;
 
+  // Training certificates — partial credit, full at 3+.
   const certCount = (profile.trainingCertificates || []).length;
-  const certsScore = certCount >= 3 ? 8 : certCount === 2 ? 6 : certCount === 1 ? 3 : 0;
+  const certsScore = certCount >= 3 ? 15 : certCount === 2 ? 10 : certCount === 1 ? 5 : 0;
 
   const breakdown = [
     { label: 'Complete Profile', earned: profileComplete ? 10 : 0, max: 10, achieved: profileComplete, tip: 'Fill in your city, state, bio, education, availability, positions, and age groups.' },
-    { label: 'Portable Background Check', earned: portableBg ? 20 : (anyBg ? 5 : 0), max: 20, achieved: portableBg, tip: 'A portable background check lets you start work right away. Upload yours under Background Check.' },
-    { label: 'CPR Certification', earned: hasCpr ? 15 : 0, max: 15, achieved: hasCpr, tip: 'Add your CPR & First Aid card to your credentials.' },
-    { label: 'CDA / Credentials', earned: hasCda ? 15 : (hasOtherCred ? 8 : 0), max: 15, achieved: hasCda, tip: 'Upload your CDA or higher childcare credential to boost your score.' },
-    { label: 'Fast Response Time', earned: responseRateScore, max: 10, achieved: responseRateScore >= 8, tip: 'Respond to messages within 24 hours to keep your score high.' },
-    { label: 'Professional References', earned: refsScore, max: 7, achieved: refsScore === 7, tip: 'Add 3 references (name, relationship, phone). Centers can contact them directly to verify your work history.' },
-    { label: 'Training Certificates', earned: certsScore, max: 8, achieved: certsScore === 8, tip: 'Upload your training certificates (GELDS, preservice, CEUs, etc.) — 3 or more for full credit.' },
-    { label: 'Completed Shifts / Jobs', earned: completedShiftsScore, max: 10, achieved: completedShiftsScore >= 8, tip: 'Complete shifts and finish jobs you accept to build your track record.' },
-    { label: 'No No-Shows', earned: noShowScore, max: 5, achieved: noShowScore === 5, tip: 'Show up to every shift you commit to.' },
+    { label: 'Background Check', earned: bgScore, max: 20, achieved: portableBg || clearedBg, tip: 'A portable background check earns full points and lets you start work right away. None = 0, In progress = 8, Cleared/current = 15, Portable = 20.' },
+    { label: 'CPR & First Aid Certification', earned: hasCpr ? 15 : 0, max: 15, achieved: hasCpr, tip: 'Upload your current CPR & First Aid card.' },
+    { label: 'CDA Credential', earned: hasCda ? 15 : 0, max: 15, achieved: hasCda, tip: 'Upload your Child Development Associate (CDA) credential.' },
+    { label: 'Education Level', earned: eduScore, max: 18, achieved: eduScore >= 12, tip: 'Some College = 6, Associate degree = 12, Bachelor degree or higher = 18.' },
+    { label: 'Professional References', earned: refsScore, max: 7, achieved: refsScore === 7, tip: 'Add references centers can contact. 1 = 2 pts, 2 = 5 pts, 3 = 7 pts.' },
+    { label: 'Training Certificates', earned: certsScore, max: 15, achieved: certsScore === 15, tip: 'Upload training certificates (GELDS, preservice, CEUs). 1 = 5 pts, 2 = 10 pts, 3+ = 15 pts.' },
   ];
   const total = breakdown.reduce((s, b) => s + b.earned, 0);
 
@@ -5971,6 +5969,24 @@ function ReadinessScoreCard({ profile, history = {}, mode = 'worker' }) {
       <div style={{ height: 10, background: c.borderSoft, borderRadius: 999, overflow: 'hidden', marginBottom: 14 }}>
         <div style={{ height: '100%', width: `${score.total}%`, background: `linear-gradient(90deg, ${ringColor}, ${c.primary})`, transition: 'width 400ms ease' }} />
       </div>
+
+      {/* Explainer + background-check points — worker view only */}
+      {mode === 'worker' && (
+        <div style={{ background: c.cream, border: `1px solid ${c.border}`, borderRadius: 11, padding: '12px 14px', marginBottom: 14 }}>
+          <p style={{ fontSize: 12.5, color: c.text, lineHeight: 1.55, marginBottom: 10 }}>
+            <strong>This is your readiness guide, not a job application.</strong> Your Professional Readiness Score is a snapshot of how prepared and verifiable your profile looks to Georgia daycare centers. Complete each section below to raise your score — a higher score means more visibility and faster interview offers. Scroll down to update your profile, credentials, and background check.
+          </p>
+          <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 9 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How the Background Check scores (max 20)</div>
+            <div className="space-y-1" style={{ fontSize: 12, color: c.text }}>
+              <div className="flex items-center justify-between"><span>No background check</span><span style={{ fontWeight: 700, color: c.textMuted }}>0 pts</span></div>
+              <div className="flex items-center justify-between"><span>Background check in progress</span><span style={{ fontWeight: 700, color: c.gold }}>8 pts</span></div>
+              <div className="flex items-center justify-between"><span>Cleared &amp; current</span><span style={{ fontWeight: 700, color: c.primary }}>15 pts</span></div>
+              <div className="flex items-center justify-between"><span>Portable background check</span><span style={{ fontWeight: 800, color: c.success }}>20 pts</span></div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Verification badges */}
       {score.badges.length > 0 && (
