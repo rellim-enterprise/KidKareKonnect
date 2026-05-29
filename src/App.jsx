@@ -524,7 +524,10 @@ function calculateReadinessScore(profile, history = {}) {
 
   const creds = (profile.credentials || []).map(s => s.toLowerCase());
   const credFiles = (profile.credentialFiles || []).map(s => s.toLowerCase());
-  const hasCpr = creds.some(s => s.includes('cpr')) || credFiles.some(s => s.includes('cpr'));
+  // CPR counts when a current (non-expired) CPR card is uploaded, or the
+  // credential is marked. An expired uploaded card does NOT count.
+  const cprValidUpload = !!profile.cprDocUrl && !isExpired(profile.cprExpires);
+  const hasCpr = cprValidUpload || creds.some(s => s.includes('cpr')) || credFiles.some(s => s.includes('cpr'));
   const hasCda = creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
 
   // Education level — broken into degree tiers.
@@ -783,9 +786,18 @@ function profileStateToRow(profile) {
     photo_url: profile.photo || null,
     professional_references: profile.references || [],
     training_certificates: profile.trainingCertificates || [],
-    // (identity_status / identity_doc_url removed — feature deprecated.
-    // See REMOVED-CODE comments in the React component for full removal.)
+    cpr_doc_url: profile.cprDocUrl || null,
+    cpr_expires: profile.cprExpires || null,
+    crc_doc_url: profile.crcDocUrl || null,
+    crc_expires: profile.crcExpires || null,
   };
+}
+
+// Is a 'valid through' date in the past? (date string YYYY-MM-DD)
+function isExpired(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr + 'T23:59:59');
+  return !isNaN(d.getTime()) && d.getTime() < Date.now();
 }
 
 // Map profiles table row -> app-state profile shape
@@ -810,6 +822,10 @@ function rowToProfileState(row, fallbackState) {
     credentialUrls: row.credential_urls || [],
     references: row.professional_references || [],
     trainingCertificates: row.training_certificates || [],
+    cprDocUrl: row.cpr_doc_url || '',
+    cprExpires: row.cpr_expires || '',
+    crcDocUrl: row.crc_doc_url || '',
+    crcExpires: row.crc_expires || '',
   };
 }
 
@@ -1607,7 +1623,7 @@ export default function App() {
   // organized under {auth.uid()}/photo.jpg, /resume.pdf, /credentials/*.
   // The public URL is stored in profile state so it works across devices.
   // ============================================================
-  const [uploading, setUploading] = useState({ photo: false, resume: false, cred: false });
+  const [uploading, setUploading] = useState({ photo: false, resume: false, cred: false, cpr: false, crc: false });
 
   async function uploadToStorage(path, blob, contentType) {
     const { data: { user } } = await supabase.auth.getUser();
@@ -1776,6 +1792,29 @@ export default function App() {
       credentialFiles: profile.credentialFiles.filter((_, i) => i !== idx),
       credentialUrls: (profile.credentialUrls || []).filter((_, i) => i !== idx),
     });
+  };
+
+  // Dedicated uploads: CPR & First Aid card, and CRC (background check).
+  const handleDocUpload = async (e, kind) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 10 * 1024 * 1024) { alert('File must be under 10MB'); return; }
+    setUploading(u => ({ ...u, [kind]: true }));
+    try {
+      const ext = (f.name.split('.').pop() || 'pdf').toLowerCase();
+      const safeName = f.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+      const url = await uploadToStorage(`${kind}/${Date.now()}-${safeName}`, f, f.type || 'application/pdf');
+      if (kind === 'cpr') setProfile(p => ({ ...p, cprDocUrl: url }));
+      else setProfile(p => ({ ...p, crcDocUrl: url }));
+    } catch (err) {
+      alert(`Couldn't upload: ${err.message}`);
+    } finally {
+      setUploading(u => ({ ...u, [kind]: false }));
+    }
+  };
+  const removeDoc = (kind) => {
+    if (kind === 'cpr') setProfile(p => ({ ...p, cprDocUrl: '', cprExpires: '' }));
+    else setProfile(p => ({ ...p, crcDocUrl: '', crcExpires: '' }));
   };
 
   const signOut = async () => {
@@ -3816,6 +3855,72 @@ export default function App() {
                       </div>
                     ))}
                   </div>
+                )}
+              </div>
+
+              {/* Background Check (CRC) — verified by manual "valid through" date */}
+              <div style={{ borderTop: `1px solid ${c.border}`, paddingTop: 14 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 4 }}>
+                  <Shield size={14} color={c.primary} /> Background Check (CRC Card)
+                </label>
+                <p style={{ fontSize: 11.5, color: c.textMuted, lineHeight: 1.45, marginBottom: 8 }}>
+                  Upload your Georgia Criminal Records Check (CRC) card and enter its <b>valid-through date</b> so centers can confirm it hasn't expired.
+                </p>
+                {profile.crcDocUrl ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1.5px solid ${isExpired(profile.crcExpires) ? c.coral : c.primary}`, borderRadius: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <a href={profile.crcDocUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2" style={{ fontSize: 13, color: c.primaryDark, fontWeight: 600, textDecoration: 'none' }}>
+                        <FileText size={15} color={c.primary} /> View uploaded CRC card
+                      </a>
+                      <button onClick={() => removeDoc('crc')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.textMuted, padding: 2 }}><Trash2 size={14} /></button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: c.text }}>Valid through:</span>
+                      <input type="date" value={profile.crcExpires || ''} onChange={e => setProfile({ ...profile, crcExpires: e.target.value })} style={{ padding: '6px 9px', fontSize: 12.5, border: `1.5px solid ${c.border}`, borderRadius: 8, background: c.white, color: c.text, outline: 'none', fontFamily: 'inherit' }} />
+                      {profile.crcExpires && (isExpired(profile.crcExpires)
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 700, color: c.white, background: c.coral, padding: '3px 9px', borderRadius: 20 }}><AlertCircle size={12} /> Expired</span>
+                        : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 700, color: '#16794C', background: '#E3F5EC', padding: '3px 9px', borderRadius: 20 }}><CheckCircle2 size={12} /> Valid</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '12px', background: c.cream, border: `2px dashed ${c.border}`, borderRadius: 10, cursor: 'pointer', color: c.textMuted, fontSize: 12.5, fontWeight: 600 }}>
+                    <Upload size={14} /> {uploading.crc ? 'Uploading…' : 'Upload CRC Card (PDF, JPG, PNG)'}
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleDocUpload(e, 'crc')} disabled={uploading.crc} style={{ display: 'none' }} />
+                  </label>
+                )}
+              </div>
+
+              {/* CPR & First Aid — separate upload with manual expiry */}
+              <div style={{ borderTop: `1px solid ${c.border}`, paddingTop: 14 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: c.text, marginBottom: 4 }}>
+                  <Heart size={14} color={c.primary} /> CPR &amp; First Aid Certification
+                </label>
+                <p style={{ fontSize: 11.5, color: c.textMuted, lineHeight: 1.45, marginBottom: 8 }}>
+                  Upload your CPR &amp; First Aid card and enter its <b>valid-through date</b>. An expired card won't count toward your readiness score.
+                </p>
+                {profile.cprDocUrl ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 13px', background: c.paleBlue, border: `1.5px solid ${isExpired(profile.cprExpires) ? c.coral : c.primary}`, borderRadius: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <a href={profile.cprDocUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2" style={{ fontSize: 13, color: c.primaryDark, fontWeight: 600, textDecoration: 'none' }}>
+                        <FileText size={15} color={c.primary} /> View uploaded CPR card
+                      </a>
+                      <button onClick={() => removeDoc('cpr')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: c.textMuted, padding: 2 }}><Trash2 size={14} /></button>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: c.text }}>Valid through:</span>
+                      <input type="date" value={profile.cprExpires || ''} onChange={e => setProfile({ ...profile, cprExpires: e.target.value })} style={{ padding: '6px 9px', fontSize: 12.5, border: `1.5px solid ${c.border}`, borderRadius: 8, background: c.white, color: c.text, outline: 'none', fontFamily: 'inherit' }} />
+                      {profile.cprExpires && (isExpired(profile.cprExpires)
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 700, color: c.white, background: c.coral, padding: '3px 9px', borderRadius: 20 }}><AlertCircle size={12} /> Expired</span>
+                        : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, fontWeight: 700, color: '#16794C', background: '#E3F5EC', padding: '3px 9px', borderRadius: 20 }}><CheckCircle2 size={12} /> Valid</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '12px', background: c.cream, border: `2px dashed ${c.border}`, borderRadius: 10, cursor: 'pointer', color: c.textMuted, fontSize: 12.5, fontWeight: 600 }}>
+                    <Upload size={14} /> {uploading.cpr ? 'Uploading…' : 'Upload CPR & First Aid Card (PDF, JPG, PNG)'}
+                    <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleDocUpload(e, 'cpr')} disabled={uploading.cpr} style={{ display: 'none' }} />
+                  </label>
                 )}
               </div>
             </Section>
