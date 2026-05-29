@@ -494,19 +494,14 @@ async function kkToggleSaveCandidate(ownerId, workerId, currentlySaved) {
 }
 
 // ============================================================
-// Professional Readiness Score
+// Professional Readiness Score — safety-weighted, totals 100.
 // ============================================================
-// Components that work today (computed from profile data):
-//   - Complete Profile (+10)
-//   - Portable Background Check (+20)
-//   - CPR Certification (+15)
-//   - CDA / Credentials (+15)
-//   - No No-Shows (+5, default — presumed good for new users)
-// Components that require future tracking systems (default to 0 for now):
-//   - Fast Response Time (+10)  → needs message-response tracking
-//   - Positive Employer Reviews (+15)  → needs review system
-//   - Completed Shifts / Jobs (+10)  → needs shift-completion tracking
-// As those systems come online they slot directly into this function.
+//   - Complete Profile ............ 12
+//   - Background Check (CRC) ...... 35  (none 0 / in-progress 14 / cleared or valid CRC 25 / portable 35)
+//   - CPR & First Aid ............. 30  (current, non-expired card)
+//   - Education & Credential ....... 8  (HS/GED 0 / CDA 2 / Associate 4 / Bachelor 6 / Master+ 8)
+//   - Training Hours ............... 8  (5h 2 / 10h 4 / 18h 8)
+//   - Professional References ...... 7  (1 ref 2 / 2 refs 5 / 3+ refs 7)
 function calculateReadinessScore(profile, history = {}) {
   if (!profile) return { total: 0, breakdown: [], badges: [] };
   const completeFields = ['city', 'state', 'bio', 'education', 'availability'];
@@ -522,14 +517,17 @@ function calculateReadinessScore(profile, history = {}) {
   const portableBg = bg.includes('portable');
   const clearedBg = bg.includes('cleared') || bg.includes('current') || bg.includes('complete');
   const inProgressBg = bg.includes('progress') || bg.includes('pending');
-  const crcValid = !!profile.crcDocUrl && !isExpired(profile.crcExpires);
+  // A valid CRC upload requires BOTH a file and a non-expired date so we
+  // never count an undated/unverifiable card.
+  const crcValid = !!profile.crcDocUrl && !!profile.crcExpires && !isExpired(profile.crcExpires);
   const bgScore = portableBg ? 35 : (clearedBg || crcValid) ? 25 : inProgressBg ? 14 : 0;
 
   const creds = (profile.credentials || []).map(s => s.toLowerCase());
   const credFiles = (profile.credentialFiles || []).map(s => s.toLowerCase());
   // CPR counts when a current (non-expired) CPR card is uploaded, or the
   // credential is marked. An expired uploaded card does NOT count.
-  const cprValidUpload = !!profile.cprDocUrl && !isExpired(profile.cprExpires);
+  // A valid CPR upload requires BOTH a file and a non-expired date.
+  const cprValidUpload = !!profile.cprDocUrl && !!profile.cprExpires && !isExpired(profile.cprExpires);
   const hasCpr = cprValidUpload || creds.some(s => s.includes('cpr')) || credFiles.some(s => s.includes('cpr'));
 
   // Education & Credential — single dropdown, max 8.
@@ -540,7 +538,7 @@ function calculateReadinessScore(profile, history = {}) {
     : edu.includes('associate') ? 4
     : edu.includes('cda') ? 2
     : 0;
-  const hasCda = edu.includes('cda') || eduScore >= 4 || creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
+  const hasCda = edu.includes('cda') || creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
 
   // Professional references — partial credit for 1 or 2, full at 3.
   const refCount = (profile.references || []).length;
@@ -1211,8 +1209,14 @@ export default function App() {
       }
       const sign = await STORE.get('kk_signup');
       if (sign) setSignup(prev => prev.email ? prev : sign);
-      const prof = await STORE.get('kk_profile');
-      if (prof) setProfile(prof);
+      // Only fall back to the generic cached profile when there's NO live
+      // session. With a session (including act-as impersonation) we've
+      // already hydrated the real profile above — restoring the generic
+      // cache here would clobber it with whoever was last on this device.
+      if (!(session && session.user)) {
+        const prof = await STORE.get('kk_profile');
+        if (prof) setProfile(prof);
+      }
       const jobs = await STORE.get('kk_jobs');
       if (jobs) {
         setApplied(jobs.applied || []);
@@ -2105,23 +2109,38 @@ export default function App() {
     setActAsBusy(true);
     const restore = await STORE.get('kkk_admin_restore');
     const imp = await STORE.get('kkk_impersonation');
-    await STORE.del('kkk_admin_restore');
+    // Clearing the impersonation context early is safe — it only drives the
+    // banner. We DON'T delete the admin-restore tokens until setSession has
+    // actually succeeded, so a failed restore doesn't strand the user.
     await STORE.del('kkk_impersonation');
     try {
       if (restore?.access_token && restore?.refresh_token) {
         // Restore the admin session first so the audit-close call below is
         // authorized as the super admin again.
-        await supabase.auth.setSession({ access_token: restore.access_token, refresh_token: restore.refresh_token });
+        const { error } = await supabase.auth.setSession({ access_token: restore.access_token, refresh_token: restore.refresh_token });
+        if (error) {
+          // Admin session can't be restored (e.g. refresh token expired).
+          // Keep the restore key so a retry is possible, and tell the user.
+          alert('Your admin session has expired — please sign in again to return to your admin account.');
+          await STORE.del('kkk_admin_restore');
+          await supabase.auth.signOut();
+          window.location.reload();
+          return;
+        }
+        await STORE.del('kkk_admin_restore');
         if (imp?.logId) {
           // Best-effort close of the audit row.
           await kkAdminCallEdge('admin-impersonate', { action: 'end', logId: imp.logId });
         }
       } else {
         // No stored admin session — safest is to sign out completely.
+        await STORE.del('kkk_admin_restore');
         await supabase.auth.signOut();
       }
     } catch (e) {
-      // ignore — we still reload below
+      // Unexpected error — sign out so we never leave a half-restored state.
+      await STORE.del('kkk_admin_restore');
+      await supabase.auth.signOut();
     }
     window.location.reload();
   };
@@ -5059,9 +5078,8 @@ export default function App() {
               <ReadinessScoreCard profile={profile} history={myWorkerHistory || {}} mode="worker" />
             </div>
 
-            {/* References + Training Certificates — the two components that
-                replace 'Positive Employer Reviews' in the score (15 pts
-                total: 7 + 8). Verified Identity was removed for privacy. */}
+            {/* References (max 7) + Training Hours (max 8) — two scored
+                components of the 100-pt Readiness Score. */}
             <div className="grid lg:grid-cols-2 gap-3" style={{ marginBottom: 16 }}>
               {/* Professional References */}
               <div style={{ background: c.white, border: `1px solid ${c.border}`, borderRadius: 14, padding: 16 }}>
