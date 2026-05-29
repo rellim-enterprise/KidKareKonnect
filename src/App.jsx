@@ -1009,6 +1009,11 @@ export default function App() {
   const [showRolePerms, setShowRolePerms] = useState(false);
   const [impersonatingRole, setImpersonatingRole] = useState(null);
   const realUserTypeRef = useRef(null);
+  // Full act-as impersonation (Super Admin only): actually signs in AS a
+  // specific user so the admin can respond/edit on their behalf. The banner
+  // context survives reloads via localStorage (key kkk_impersonation).
+  const [actingAs, setActingAs] = useState(null); // { targetId, targetName, adminName } | null
+  const [actAsBusy, setActAsBusy] = useState(false);
   // Admin detail panels
   const [adminViewUser, setAdminViewUser] = useState(null);   // user row being managed
   const [adminUserEdit, setAdminUserEdit] = useState(null);   // editable copy of fields
@@ -1107,6 +1112,12 @@ export default function App() {
   // Load from storage on mount
   useEffect(() => {
     (async () => {
+      // 0) If a Super Admin is mid "act-as" impersonation, restore the banner
+      // context. The live session is already the target user's, so the rest of
+      // this loader hydrates everything as them.
+      const impCtx = await STORE.get('kkk_impersonation');
+      if (impCtx && impCtx.targetId) setActingAs(impCtx);
+
       // 1) Resolve the real Supabase session first. If the user has a live
       // session, we hydrate from their profile row, not from localStorage.
       const { data: { session } } = await supabase.auth.getSession();
@@ -2048,6 +2059,65 @@ export default function App() {
     setView('app');
   };
 
+  // ---- Full act-as impersonation (Super Admin only) ----
+  // Signs the super admin into the TARGET user's session so they can
+  // respond and edit as that user. We stash the admin's own session so we
+  // can restore it on exit, write an audit row via the Edge Function, then
+  // reload so the whole app re-hydrates as the target user.
+  const actAsUser = async (target) => {
+    if (!isSuperAdmin || !target) return;
+    if (!window.confirm(`Act as ${target.name || target.email}? You'll be signed in as them and any messages or edits you make will be on their behalf. This is recorded in the audit log.`)) return;
+    setActAsBusy(true);
+    try {
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+      if (!adminSession) { alert('Your session expired — please sign in again.'); setActAsBusy(false); return; }
+      const { ok, data, error } = await kkAdminCallEdge('admin-impersonate', { targetUserId: target.id });
+      if (!ok || !data?.token_hash) { alert(`Couldn't start: ${error || 'no token returned'}`); setActAsBusy(false); return; }
+      // Stash the admin's session + the impersonation context BEFORE swapping,
+      // so a mid-session reload can still show the banner and restore later.
+      await STORE.set('kkk_admin_restore', { access_token: adminSession.access_token, refresh_token: adminSession.refresh_token });
+      await STORE.set('kkk_impersonation', { targetId: data.target_id, targetName: data.target_name || target.name || target.email, adminName: signup.name || adminSession.user?.email || 'Admin', logId: data.log_id || null });
+      const { error: vErr } = await supabase.auth.verifyOtp({ type: 'magiclink', token_hash: data.token_hash });
+      if (vErr) {
+        await STORE.del('kkk_admin_restore');
+        await STORE.del('kkk_impersonation');
+        alert(`Couldn't switch accounts: ${vErr.message}`);
+        setActAsBusy(false);
+        return;
+      }
+      // Re-hydrate everything as the target by reloading.
+      window.location.reload();
+    } catch (e) {
+      alert(`Couldn't start: ${e.message}`);
+      setActAsBusy(false);
+    }
+  };
+
+  const stopActingAs = async () => {
+    setActAsBusy(true);
+    const restore = await STORE.get('kkk_admin_restore');
+    const imp = await STORE.get('kkk_impersonation');
+    await STORE.del('kkk_admin_restore');
+    await STORE.del('kkk_impersonation');
+    try {
+      if (restore?.access_token && restore?.refresh_token) {
+        // Restore the admin session first so the audit-close call below is
+        // authorized as the super admin again.
+        await supabase.auth.setSession({ access_token: restore.access_token, refresh_token: restore.refresh_token });
+        if (imp?.logId) {
+          // Best-effort close of the audit row.
+          await kkAdminCallEdge('admin-impersonate', { action: 'end', logId: imp.logId });
+        }
+      } else {
+        // No stored admin session — safest is to sign out completely.
+        await supabase.auth.signOut();
+      }
+    } catch (e) {
+      // ignore — we still reload below
+    }
+    window.location.reload();
+  };
+
   // Load the owner's center profile (address, quality rated, hours) so
   // the My Center editor shows their saved data across devices.
   useEffect(() => {
@@ -2617,6 +2687,16 @@ export default function App() {
         <div style={{ background: c.gold, color: c.navy, padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13, fontWeight: 700, position: 'sticky', top: 68, zIndex: 49 }}>
           <Eye size={15} /> Previewing as {impersonatingRole === 'worker' ? 'Teacher' : impersonatingRole === 'owner' ? 'Director' : 'Partner'}
           <button onClick={exitImpersonate} style={{ background: c.navy, color: c.white, border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Exit preview</button>
+        </div>
+      )}
+
+      {/* ACT-AS BANNER — shown while a Super Admin is signed in AS another user */}
+      {actingAs && (
+        <div style={{ background: c.coralDark || c.coral, color: c.white, padding: '9px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13, fontWeight: 700, position: 'sticky', top: 68, zIndex: 49, flexWrap: 'wrap', textAlign: 'center' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+            <Shield size={15} /> Acting as <b>{actingAs.targetName || 'this user'}</b> — messages &amp; edits are on their behalf
+          </span>
+          <button onClick={stopActingAs} disabled={actAsBusy} style={{ background: c.white, color: c.coralDark || c.coral, border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 800, cursor: actAsBusy ? 'wait' : 'pointer' }}>{actAsBusy ? 'Returning…' : 'Return to my admin account'}</button>
         </div>
       )}
 
@@ -5207,10 +5287,18 @@ export default function App() {
           {/* Account actions */}
           <div style={{ borderTop: `1px solid ${c.border}`, paddingTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={adminSendResetLink} style={{ padding: '9px 14px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><KeyRound size={13} /> Send Password Reset Link</button>
+            {isSuperAdmin && adminViewUser.admin_level !== 'super_admin' && (
+              <button onClick={() => actAsUser(adminViewUser)} disabled={actAsBusy} style={{ padding: '9px 14px', background: c.navy, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: actAsBusy ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Eye size={13} /> {actAsBusy ? 'Switching…' : 'Act as This User'}</button>
+            )}
             {isSuperAdmin && (
               <button onClick={adminDeleteUser} style={{ padding: '9px 14px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}><Trash2 size={13} /> Delete Account</button>
             )}
           </div>
+          {isSuperAdmin && adminViewUser.admin_level !== 'super_admin' && (
+            <p style={{ fontSize: 11, color: c.textMuted, marginTop: 8, lineHeight: 1.45 }}>
+              <b>Act as This User</b> signs you in as {adminViewUser.name || 'this person'} so you can reply to messages or fix their profile on their behalf. A red banner stays on screen the whole time, and the session is recorded in the audit log. Use “Return to my admin account” to switch back.
+            </p>
+          )}
         </Modal>
       )}
 
