@@ -197,7 +197,8 @@ function hasFeature(planName, feature) {
     case 'verification_badges':
     case 'reliability_indicators':
     case 'background_checks':
-      return rank >= 2; // Pro and up
+    case 'sub_shifts':
+      return rank >= 2; // Pro and up (Konnect Basic must upgrade)
     case 'trusted_network':
     case 'unlimited_jobs':
       return rank >= 3; // Premium and up
@@ -514,13 +515,15 @@ function calculateReadinessScore(profile, history = {}) {
   const hasAgeGroups = (profile.ageGroups || []).length > 0;
   const profileComplete = filledCount === completeFields.length && hasPositions && hasAgeGroups;
 
-  // Background Check — tiered: Portable (20) > Cleared/current (15) >
-  // In progress (8) > None (0).
+  // Background Check (CRC) — safety-weighted, max 35. A verified portable
+  // CRC earns full points. A non-expired uploaded CRC card counts at least
+  // as "cleared". Tiers: None 0 / In progress 14 / Cleared 25 / Portable 35.
   const bg = (profile.bgCheck || '').toLowerCase();
   const portableBg = bg.includes('portable');
   const clearedBg = bg.includes('cleared') || bg.includes('current') || bg.includes('complete');
   const inProgressBg = bg.includes('progress') || bg.includes('pending');
-  const bgScore = portableBg ? 20 : clearedBg ? 15 : inProgressBg ? 8 : 0;
+  const crcValid = !!profile.crcDocUrl && !isExpired(profile.crcExpires);
+  const bgScore = portableBg ? 35 : (clearedBg || crcValid) ? 25 : inProgressBg ? 14 : 0;
 
   const creds = (profile.credentials || []).map(s => s.toLowerCase());
   const credFiles = (profile.credentialFiles || []).map(s => s.toLowerCase());
@@ -528,29 +531,34 @@ function calculateReadinessScore(profile, history = {}) {
   // credential is marked. An expired uploaded card does NOT count.
   const cprValidUpload = !!profile.cprDocUrl && !isExpired(profile.cprExpires);
   const hasCpr = cprValidUpload || creds.some(s => s.includes('cpr')) || credFiles.some(s => s.includes('cpr'));
-  const hasCda = creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
 
-  // Education level — broken into degree tiers.
+  // Education & Credential — single dropdown, max 8.
+  // High School/GED = 0, CDA = 2, Associate = 4, Bachelor = 6, Master+ = 8.
   const edu = (profile.education || '').toLowerCase();
-  const eduScore = (edu.includes('bachelor') || edu.includes('master') || edu.includes('doctora'))
-    ? 18 : edu.includes('associate') ? 12 : edu.includes('some college') ? 6 : 0;
+  const eduScore = (edu.includes('master') || edu.includes('doctora')) ? 8
+    : edu.includes('bachelor') ? 6
+    : edu.includes('associate') ? 4
+    : edu.includes('cda') ? 2
+    : 0;
+  const hasCda = edu.includes('cda') || eduScore >= 4 || creds.some(s => s.includes('cda')) || credFiles.some(s => s.includes('cda'));
 
   // Professional references — partial credit for 1 or 2, full at 3.
   const refCount = (profile.references || []).length;
   const refsScore = refCount >= 3 ? 7 : refCount === 2 ? 5 : refCount === 1 ? 2 : 0;
 
-  // Training certificates — partial credit, full at 3+.
-  const certCount = (profile.trainingCertificates || []).length;
-  const certsScore = certCount >= 3 ? 15 : certCount === 2 ? 10 : certCount === 1 ? 5 : 0;
+  // Training — scored by total documented hours, max 8.
+  // 5+ hrs = 2, 10+ hrs = 4, 18+ hrs = 8.
+  const trainingHours = (profile.trainingCertificates || [])
+    .reduce((sum, ct) => sum + (parseFloat(ct.hours) || 0), 0);
+  const trainingScore = trainingHours >= 18 ? 8 : trainingHours >= 10 ? 4 : trainingHours >= 5 ? 2 : 0;
 
   const breakdown = [
-    { label: 'Complete Profile', earned: profileComplete ? 10 : 0, max: 10, achieved: profileComplete, tip: 'Fill in your city, state, bio, education, availability, positions, and age groups.' },
-    { label: 'Background Check', earned: bgScore, max: 20, achieved: portableBg || clearedBg, tip: 'A portable background check earns full points and lets you start work right away. None = 0, In progress = 8, Cleared/current = 15, Portable = 20.' },
-    { label: 'CPR & First Aid Certification', earned: hasCpr ? 15 : 0, max: 15, achieved: hasCpr, tip: 'Upload your current CPR & First Aid card.' },
-    { label: 'CDA Credential', earned: hasCda ? 15 : 0, max: 15, achieved: hasCda, tip: 'Upload your Child Development Associate (CDA) credential.' },
-    { label: 'Education Level', earned: eduScore, max: 18, achieved: eduScore >= 12, tip: 'Some College = 6, Associate degree = 12, Bachelor degree or higher = 18.' },
+    { label: 'Complete Profile', earned: profileComplete ? 12 : 0, max: 12, achieved: profileComplete, tip: 'Fill in your city, state, bio, education, availability, positions, and age groups.' },
+    { label: 'Background Check (CRC)', earned: bgScore, max: 35, achieved: portableBg || clearedBg || crcValid, tip: 'Upload your Georgia CRC card with a valid date. None = 0, In progress = 14, Cleared/current = 25, Portable = 35.' },
+    { label: 'CPR & First Aid', earned: hasCpr ? 30 : 0, max: 30, achieved: hasCpr, tip: 'Upload your current (non-expired) CPR & First Aid card.' },
+    { label: 'Education & Credential', earned: eduScore, max: 8, achieved: eduScore > 0, tip: 'Highest education/credential: High School/GED = 0, CDA = 2, Associate = 4, Bachelor = 6, Master or higher = 8.' },
+    { label: 'Training Hours', earned: trainingScore, max: 8, achieved: trainingScore === 8, tip: 'Add training hours: 5+ hrs = 2, 10+ hrs = 4, 18+ hrs = 8 pts.' },
     { label: 'Professional References', earned: refsScore, max: 7, achieved: refsScore === 7, tip: 'Add references centers can contact. 1 = 2 pts, 2 = 5 pts, 3 = 7 pts.' },
-    { label: 'Training Certificates', earned: certsScore, max: 15, achieved: certsScore === 15, tip: 'Upload training certificates (GELDS, preservice, CEUs). 1 = 5 pts, 2 = 10 pts, 3+ = 15 pts.' },
   ];
   const total = breakdown.reduce((s, b) => s + b.earned, 0);
 
@@ -2239,6 +2247,13 @@ export default function App() {
   const offerToCover = async (subRequestId) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { alert('Please sign in again.'); return; }
+    // Workers must finish their applicant profile in full before they can
+    // pick up a sub shift. (Super admins acting/previewing are exempt.)
+    if (!profileComplete && !isSuperAdmin) {
+      alert('Before you can submit for a sub shift, you must complete your applicant profile in its entirety. Head to My Profile, fill out every section, then come back and submit.');
+      setView('profile');
+      return;
+    }
     const { error } = await kkCreateSubOffer(subRequestId, user.id);
     if (error) { alert(`Could not send your offer: ${error.message}`); return; }
     kkNotify({ type: 'sub_offer', subRequestId });
@@ -2682,11 +2697,13 @@ export default function App() {
         </div>
       </header>
 
-      {/* IMPERSONATION BANNER — shown while an admin previews another role */}
+      {/* ROLE BANNER — admin is acting in another role. For Super Admins this
+          is LIVE: anything posted/published takes effect under their account. */}
       {impersonatingRole && (
-        <div style={{ background: c.gold, color: c.navy, padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13, fontWeight: 700, position: 'sticky', top: 68, zIndex: 49 }}>
-          <Eye size={15} /> Previewing as {impersonatingRole === 'worker' ? 'Teacher' : impersonatingRole === 'owner' ? 'Director' : 'Partner'}
-          <button onClick={exitImpersonate} style={{ background: c.navy, color: c.white, border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Exit preview</button>
+        <div style={{ background: c.gold, color: c.navy, padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, fontSize: 13, fontWeight: 700, position: 'sticky', top: 68, zIndex: 49, flexWrap: 'wrap', textAlign: 'center' }}>
+          <Eye size={15} /> Acting as {impersonatingRole === 'worker' ? 'Teacher' : impersonatingRole === 'owner' ? 'Director' : 'Partner'}
+          {isSuperAdmin ? ' — changes you make are LIVE' : ' — preview only'}
+          <button onClick={exitImpersonate} style={{ background: c.navy, color: c.white, border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Exit</button>
         </div>
       )}
 
@@ -3893,7 +3910,7 @@ export default function App() {
             <Section icon={Briefcase} title="Your Background" sub="Tell us about your experience.">
               <Select label="Years of Experience *" value={profile.years} onChange={v => setProfile({...profile, years: v})} options={['Less than 1 year','1 to 2 years','3 to 5 years','6 to 10 years','10+ years']} placeholder="Select" />
               <ChipGroup label="Age Groups You've Worked With" items={AGE_GROUPS} selected={profile.ageGroups} onChange={item => setProfile({...profile, ageGroups: toggleArr(profile.ageGroups, item)})} />
-              <Select label="Highest Education" value={profile.education} onChange={v => setProfile({...profile, education: v})} options={['High School / GED','Some College','Associate Degree','Bachelor Degree','Master Degree']} placeholder="Select" />
+              <Select label="Highest Education / Credential" value={profile.education} onChange={v => setProfile({...profile, education: v})} options={['High School Diploma / GED','CDA Credential','Associate Degree',"Bachelor's Degree","Master's Degree"]} placeholder="Select" />
               <Select label="Availability *" value={profile.availability} onChange={v => setProfile({...profile, availability: v})} options={['Full Time','Part Time','Both','Substitute only']} placeholder="Select" />
               <ChipGroup label="Positions You're Interested In *" items={POSITIONS_LIST} selected={profile.positions} onChange={item => setProfile({...profile, positions: toggleArr(profile.positions, item)})} />
             </Section>
@@ -4795,7 +4812,18 @@ export default function App() {
           );
         })()}
 
-        {tab === 'subs' && signedIn && userType === 'owner' && (
+        {tab === 'subs' && signedIn && userType === 'owner' && !hasFeature(plan, 'sub_shifts') && !isSuperAdmin && (
+          <div style={{ maxWidth: 560, margin: '24px auto', textAlign: 'center', background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 16, padding: '32px 26px' }}>
+            <div style={{ width: 64, height: 64, borderRadius: '50%', background: c.paleBlue, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <Lock size={28} color={c.primary} />
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 8 }}>Sub Shifts is a Pro feature</h2>
+            <p style={{ color: c.textMuted, fontSize: 14, lineHeight: 1.55, marginBottom: 20 }}>Your <strong>Konnect Basic</strong> plan doesn't include on-demand substitute staffing. Upgrade to <strong>Konnect Pro</strong> or higher to post a shift and instantly notify available, qualified teachers near you.</p>
+            <button onClick={() => setView('pricing')} style={{ padding: '12px 24px', background: c.primary, color: c.white, border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7 }}>Upgrade to unlock Sub Shifts <ArrowRight size={16} /></button>
+          </div>
+        )}
+
+        {tab === 'subs' && signedIn && userType === 'owner' && (hasFeature(plan, 'sub_shifts') || isSuperAdmin) && (
           <div>
             <div className="flex items-start justify-between mb-2 flex-wrap gap-3">
               <div>
@@ -4877,6 +4905,16 @@ export default function App() {
               <h2 style={{ fontSize: 22, fontWeight: 800, color: c.navy, letterSpacing: '-0.02em', marginBottom: 3 }}>Sub Shifts</h2>
               <p style={{ color: c.textMuted, fontSize: 13 }}>Pick up open substitute shifts at Georgia centers. Get paid, build your reputation, help a classroom stay open.</p>
             </div>
+            {!profileComplete && (
+              <div style={{ background: '#FEF2F2', border: `1.5px solid ${c.coral}`, borderRadius: 12, padding: '13px 15px', marginBottom: 16, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <AlertCircle size={18} color={c.coralDark} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: c.coralDark, marginBottom: 2 }}>Complete your profile to pick up shifts</div>
+                  <div style={{ fontSize: 12.5, color: c.text, lineHeight: 1.45, marginBottom: 9 }}>Before you can submit for a sub shift, your applicant profile must be completed in its entirety — city, education, availability, positions, age groups, and bio.</div>
+                  <button onClick={() => setView('profile')} style={{ padding: '8px 14px', background: c.coralDark, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}><User size={13} /> Complete My Profile</button>
+                </div>
+              </div>
+            )}
             <div style={{ background: availableForSub ? '#EAF6EE' : c.white, border: `1.5px solid ${availableForSub ? c.success : c.border}`, borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 800, color: c.navy }}>Available for substitute shifts</div>
@@ -4944,6 +4982,8 @@ export default function App() {
                       </div>
                       {offered ? (
                         <span style={{ fontSize: 12, fontWeight: 700, color: c.success, display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}><CheckCircle2 size={14} /> Offer sent</span>
+                      ) : (!profileComplete && !isSuperAdmin) ? (
+                        <button onClick={() => offerToCover(r.id)} title="Complete your profile first" style={{ padding: '9px 15px', background: c.white, color: c.textMuted, border: `1.5px solid ${c.border}`, borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5 }}><Lock size={12} /> Complete profile to apply</button>
                       ) : (
                         <button onClick={() => offerToCover(r.id)} style={{ padding: '9px 15px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>I can cover this</button>
                       )}
@@ -5052,13 +5092,13 @@ export default function App() {
                   <div style={{ fontSize: 11, color: c.textMuted, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Training Certificates</div>
                   <span style={{ fontSize: 11, color: c.primary, fontWeight: 700 }}>+8 score</span>
                 </div>
-                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Upload GELDS, preservice, CEU, or any childcare training certificates you've earned.</p>
+                <p style={{ fontSize: 12, color: c.textMuted, marginBottom: 10, lineHeight: 1.4 }}>Upload GELDS, preservice, CEU, or any childcare training certificates you've earned. <b>Enter the hours for each</b> — your score is based on total training hours: 5+ hrs = 2 pts, 10+ hrs = 4 pts, 18+ hrs = 8 pts.</p>
                 <div className="space-y-2">
                   {(profile.trainingCertificates || []).map((cert, i) => (
                     <div key={i} style={{ background: c.cream, borderRadius: 8, padding: 9 }}>
                       <input value={cert.name} onChange={e => updateTrainingCert(i, 'name', e.target.value)} placeholder="Training name" style={{ width: '100%', padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white, marginBottom: 4 }} />
                       <div className="flex gap-1.5" style={{ marginBottom: 4 }}>
-                        <input value={cert.hours} onChange={e => updateTrainingCert(i, 'hours', e.target.value)} placeholder="Hours" style={{ flex: 1, padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white }} />
+                        <input type="number" min="0" step="0.5" value={cert.hours} onChange={e => updateTrainingCert(i, 'hours', e.target.value)} placeholder="Hours" style={{ flex: 1, padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white }} />
                         <input value={cert.issued_at} onChange={e => updateTrainingCert(i, 'issued_at', e.target.value)} placeholder="MM/YYYY" style={{ flex: 1, padding: '6px 9px', fontSize: 12, border: `1px solid ${c.border}`, borderRadius: 6, background: c.white }} />
                       </div>
                       <div className="flex items-center justify-between gap-2" style={{ fontSize: 11 }}>
@@ -5180,7 +5220,7 @@ export default function App() {
                 <Section icon={Briefcase} title="Background" sub="Tell us about your experience.">
                   <Select label="Years of Experience" value={profile.years} onChange={v => setProfile({...profile, years: v})} options={['Less than 1 year','1 to 2 years','3 to 5 years','6 to 10 years','10+ years']} placeholder="Select" />
                   <ChipGroup label="Age Groups You've Worked With" items={AGE_GROUPS} selected={profile.ageGroups} onChange={item => setProfile({...profile, ageGroups: toggleArr(profile.ageGroups, item)})} />
-                  <Select label="Highest Education" value={profile.education} onChange={v => setProfile({...profile, education: v})} options={['High School / GED','Some College','Associate Degree','Bachelor Degree','Master Degree']} placeholder="Select" />
+                  <Select label="Highest Education / Credential" value={profile.education} onChange={v => setProfile({...profile, education: v})} options={['High School Diploma / GED','CDA Credential','Associate Degree',"Bachelor's Degree","Master's Degree"]} placeholder="Select" />
                   <Select label="Availability" value={profile.availability} onChange={v => setProfile({...profile, availability: v})} options={['Full Time','Part Time','Both','Substitute only']} placeholder="Select" />
                   <ChipGroup label="Positions You're Interested In" items={POSITIONS_LIST} selected={profile.positions} onChange={item => setProfile({...profile, positions: toggleArr(profile.positions, item)})} />
                 </Section>
@@ -6235,12 +6275,12 @@ function ReadinessScoreCard({ profile, history = {}, mode = 'worker' }) {
             <strong>This is your readiness guide, not a job application.</strong> Your Professional Readiness Score is a snapshot of how prepared and verifiable your profile looks to Georgia daycare centers. Complete each section below to raise your score — a higher score means more visibility and faster interview offers. Scroll down to update your profile, credentials, and background check.
           </p>
           <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 9 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How the Background Check scores (max 20)</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>How the Background Check scores (max 35)</div>
             <div className="space-y-1" style={{ fontSize: 12, color: c.text }}>
               <div className="flex items-center justify-between"><span>No background check</span><span style={{ fontWeight: 700, color: c.textMuted }}>0 pts</span></div>
-              <div className="flex items-center justify-between"><span>Background check in progress</span><span style={{ fontWeight: 700, color: c.gold }}>8 pts</span></div>
-              <div className="flex items-center justify-between"><span>Cleared &amp; current</span><span style={{ fontWeight: 700, color: c.primary }}>15 pts</span></div>
-              <div className="flex items-center justify-between"><span>Portable background check</span><span style={{ fontWeight: 800, color: c.success }}>20 pts</span></div>
+              <div className="flex items-center justify-between"><span>Background check in progress</span><span style={{ fontWeight: 700, color: c.gold }}>14 pts</span></div>
+              <div className="flex items-center justify-between"><span>Cleared &amp; current (valid CRC card)</span><span style={{ fontWeight: 700, color: c.primary }}>25 pts</span></div>
+              <div className="flex items-center justify-between"><span>Portable background check</span><span style={{ fontWeight: 800, color: c.success }}>35 pts</span></div>
             </div>
           </div>
         </div>
