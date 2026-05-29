@@ -35,6 +35,44 @@ const STATES = [
   // 'Virginia','Washington','West Virginia','Wisconsin','Wyoming',
 ];
 
+// Approximate coordinates for common Georgia cities (metro Atlanta +
+// majors). Used to match applicants to jobs within a travel radius.
+// Keys are lowercased city names. Unknown cities fall back to "show it".
+const GA_CITY_COORDS = {
+  'atlanta': [33.749, -84.388], 'decatur': [33.775, -84.296], 'lithonia': [33.712, -84.105],
+  'stonecrest': [33.69, -84.12], 'conyers': [33.668, -83.998], 'covington': [33.597, -83.860],
+  'stone mountain': [33.808, -84.170], 'snellville': [33.857, -84.020], 'lawrenceville': [33.956, -83.988],
+  'lilburn': [33.890, -84.143], 'duluth': [34.003, -84.145], 'norcross': [33.941, -84.213],
+  'tucker': [33.854, -84.217], 'clarkston': [33.810, -84.239], 'ellenwood': [33.637, -84.264],
+  'mcdonough': [33.447, -84.143], 'stockbridge': [33.544, -84.234], 'jonesboro': [33.522, -84.354],
+  'riverdale': [33.572, -84.413], 'morrow': [33.583, -84.339], 'forest park': [33.622, -84.369],
+  'college park': [33.653, -84.449], 'east point': [33.679, -84.439], 'union city': [33.587, -84.542],
+  'marietta': [33.953, -84.549], 'smyrna': [33.884, -84.514], 'kennesaw': [34.023, -84.615],
+  'acworth': [34.066, -84.677], 'woodstock': [34.101, -84.519], 'alpharetta': [34.075, -84.294],
+  'roswell': [34.023, -84.362], 'sandy springs': [33.924, -84.379], 'dunwoody': [33.946, -84.335],
+  'chamblee': [33.892, -84.300], 'doraville': [33.898, -84.281], 'brookhaven': [33.866, -84.337],
+  'douglasville': [33.752, -84.748], 'powder springs': [33.859, -84.684], 'austell': [33.813, -84.634],
+  'fayetteville': [33.448, -84.455], 'peachtree city': [33.397, -84.596], 'newnan': [33.381, -84.799],
+  'loganville': [33.838, -83.901], 'grayson': [33.892, -83.957], 'suwanee': [34.052, -84.071],
+  'buford': [34.121, -84.000], 'gainesville': [34.298, -83.824], 'athens': [33.961, -83.378],
+  'macon': [32.841, -83.633], 'savannah': [32.084, -81.099], 'augusta': [33.471, -82.010],
+  'columbus': [32.461, -84.988], 'albany': [31.578, -84.156], 'valdosta': [30.833, -83.278],
+  'warner robins': [32.617, -83.600],
+};
+function cityFromLocation(loc) {
+  // "Lithonia, GA" -> "lithonia"; "Atlanta" -> "atlanta"
+  return (loc || '').split(',')[0].trim().toLowerCase();
+}
+function milesBetween(a, b) {
+  if (!a || !b) return null;
+  const toRad = d => d * Math.PI / 180;
+  const R = 3958.8; // miles
+  const dLat = toRad(b[0] - a[0]); const dLon = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]); const lat2 = toRad(b[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 // Demo jobs shown alongside real centers' postings. All Georgia for now;
 // expand the list when we open additional states.
 const SAMPLE_JOBS = [
@@ -911,6 +949,7 @@ export default function App() {
   const [applied, setApplied] = useState([]);
   const [jobSearch, setJobSearch] = useState('');
   const [jobFilter, setJobFilter] = useState('all');
+  const [nearbyOnly, setNearbyOnly] = useState(false);
   const [plan, setPlan] = useState(null);
   const [posted, setPosted] = useState([]);
   const [showPost, setShowPost] = useState(false);
@@ -2396,16 +2435,30 @@ export default function App() {
 
   const myUnreadCount = myConversations.reduce((sum, c) => sum + ((c.unreadFor || []).includes(signup.email) ? 1 : 0), 0);
 
+  const RADIUS_MILES = 30;
   const visibleJobs = useMemo(() => {
     // Georgia-only for now: every applicant sees only Georgia jobs.
     let jobs = [...realJobs, ...SAMPLE_JOBS].filter(j => !j.state || j.state === 'Georgia');
+    // Within-30-miles filter: only when the worker has a recognized city
+    // and the toggle is on. Jobs whose city we can't place are kept.
+    if (nearbyOnly && profile.city) {
+      const home = GA_CITY_COORDS[(profile.city || '').trim().toLowerCase()];
+      if (home) {
+        jobs = jobs.filter(j => {
+          const jc = GA_CITY_COORDS[cityFromLocation(j.location)];
+          if (!jc) return true; // unknown job location → don't hide it
+          const d = milesBetween(home, jc);
+          return d == null || d <= RADIUS_MILES;
+        });
+      }
+    }
     const q = (jobSearch || '').toLowerCase();
     return jobs.filter(j => {
       const s = !q || [j.title, j.location, j.center].some(v => (v || '').toLowerCase().includes(q));
       const f = jobFilter === 'all' || j.type === jobFilter;
       return s && f;
     });
-  }, [realJobs, jobSearch, jobFilter]);
+  }, [realJobs, jobSearch, jobFilter, nearbyOnly, profile.city]);
 
   const allPartners = useMemo(() => [...userListings, ...PARTNERS], [userListings]);
   const filteredPartners = useMemo(() => partnerCat === 'All' ? allPartners : allPartners.filter(p => p.category === partnerCat), [partnerCat, allPartners]);
@@ -4026,7 +4079,19 @@ export default function App() {
                   <select value={jobFilter} onChange={e => setJobFilter(e.target.value)} style={{ padding: '10px 13px', fontSize: 13.5, background: c.white, border: `1.5px solid ${c.border}`, borderRadius: 9, color: c.text, outline: 'none', fontWeight: 500 }}>
                     <option value="all">All Types</option><option value="Full Time">Full Time</option><option value="Part Time">Part Time</option>
                   </select>
+                  {signedIn && profile.city && (
+                    <button
+                      onClick={() => setNearbyOnly(v => !v)}
+                      title={GA_CITY_COORDS[(profile.city || '').trim().toLowerCase()] ? `Within 30 miles of ${profile.city}` : `We don't recognize "${profile.city}" yet — showing all Georgia`}
+                      style={{ padding: '10px 13px', fontSize: 13, fontWeight: 700, borderRadius: 9, cursor: 'pointer', border: `1.5px solid ${nearbyOnly ? c.primary : c.border}`, background: nearbyOnly ? c.primary : c.white, color: nearbyOnly ? c.white : c.text, display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
+                    >
+                      <MapPin size={13} /> Within 30 mi
+                    </button>
+                  )}
                 </div>
+                {nearbyOnly && profile.city && !GA_CITY_COORDS[(profile.city || '').trim().toLowerCase()] && (
+                  <p style={{ fontSize: 11.5, color: c.coralDark, marginTop: -6, marginBottom: 8 }}>We don't recognize "{profile.city}" for distance yet, so all Georgia jobs are shown. Try a nearby metro-Atlanta city name.</p>
+                )}
               </>
             )}
 
