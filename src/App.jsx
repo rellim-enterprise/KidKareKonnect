@@ -959,6 +959,102 @@ function mapSupabaseError(err, fallback) {
   return err.message || fallback || 'Something went wrong. Please try again.';
 }
 
+// ============================================================
+// URL Routing — clean shareable URLs for every major page.
+// ============================================================
+// Every internal `view` value maps to a real URL path so users can
+// bookmark, share, and use the browser back/forward buttons. The
+// SPA fallback in vercel.json sends any unmatched path to
+// index.html so /pricing, /daycares, etc. load directly.
+const VIEW_PATHS = {
+  welcome:        '/',
+  howItWorks:     '/how-it-works',
+  daycares:       '/daycares',
+  teachers:       '/teachers',
+  pricing:        '/pricing',
+  roleChoice:     '/sign-up',
+  signup:         '/sign-up/details',
+  login:          '/login',
+  contact:        '/contact',
+  about:          '/about',
+  privacy:        '/privacy',
+  terms:          '/terms',
+  help:           '/help',
+  verifyEmail:    '/verify-email',
+  forgotPassword: '/forgot-password',
+  partnerSignup:  '/partner/sign-up',
+  partnerLogin:   '/partner/login',
+  profile:        '/profile',
+  app:            '/app',
+};
+const PATH_VIEWS = Object.fromEntries(Object.entries(VIEW_PATHS).map(([v, p]) => [p, v]));
+
+// Compute the URL path for a given (view, tab) pair. /jobs is a public
+// alias for the in-app Jobs tab so it can stand on its own marketing URL.
+function viewToPath(view, tab) {
+  if (view === 'app' && tab === 'jobs') return '/jobs';
+  return VIEW_PATHS[view] || '/';
+}
+
+// Parse a pathname back to { view, tab? }. Unknown paths fall back to home
+// (the user explicitly asked: no 404 / no blank screen on unknown URLs).
+function parsePath(pathname) {
+  const p = ((pathname || '/').replace(/\/+$/, '') || '/').toLowerCase();
+  if (p === '/jobs') return { view: 'app', tab: 'jobs' };
+  // Hash-link legacy redirects (e.g. /#daycares) are handled at runtime
+  // because the hash isn't in pathname; see App.bootstrapURL below.
+  if (PATH_VIEWS[p]) return { view: PATH_VIEWS[p] };
+  return { view: 'welcome' };
+}
+
+// Per-page SEO. Keyed by path so direct hits and view changes both work.
+const SEO_BY_PATH = {
+  '/':                { title: 'Rellim Kid Kare Konnect | Connecting Daycares With Qualified Childcare Professionals', description: 'A childcare staffing platform helping Georgia daycares connect with qualified teachers, assistants, and childcare professionals.' },
+  '/how-it-works':    { title: 'How Rellim Kid Kare Konnect Works', description: 'Learn how our platform connects daycare centers with childcare professionals in a simple, organized way.' },
+  '/daycares':        { title: 'Find Qualified Childcare Staff for Your Daycare | Rellim Kid Kare Konnect', description: 'Daycare centers can connect with qualified childcare professionals, post jobs, and find support for staffing needs.' },
+  '/teachers':        { title: 'Find Childcare Jobs Near You | Rellim Kid Kare Konnect', description: 'Childcare teachers and professionals can discover daycare job opportunities and connect with centers looking to hire.' },
+  '/jobs':            { title: 'Childcare Job Listings | Rellim Kid Kare Konnect', description: 'Browse open childcare and daycare jobs from centers looking for qualified professionals.' },
+  '/pricing':         { title: 'Pricing for Daycares and Childcare Professionals | Rellim Kid Kare Konnect', description: 'Review subscription and membership options for daycares and childcare professionals using the platform.' },
+  '/sign-up':         { title: 'Sign Up for Rellim Kid Kare Konnect', description: 'Create an account as a daycare center or childcare professional and start connecting today.' },
+  '/sign-up/details': { title: 'Sign Up for Rellim Kid Kare Konnect', description: 'Create an account as a daycare center or childcare professional and start connecting today.' },
+  '/login':           { title: 'Login to Rellim Kid Kare Konnect', description: 'Access your Rellim Kid Kare Konnect account to manage jobs, applications, and profile details.' },
+  '/contact':         { title: 'Contact Rellim Kid Kare Konnect', description: 'Contact our team for questions about daycare staffing, job listings, subscriptions, or platform support.' },
+  '/about':           { title: 'About Rellim Kid Kare Konnect', description: 'Learn about Rellim Kid Kare Konnect — a Georgia-focused childcare staffing platform.' },
+  '/privacy':         { title: 'Privacy Policy | Rellim Kid Kare Konnect', description: 'Read the Rellim Kid Kare Konnect privacy policy.' },
+  '/terms':           { title: 'Terms of Service | Rellim Kid Kare Konnect', description: 'Read the Rellim Kid Kare Konnect terms of service.' },
+  '/help':            { title: 'Help & Support | Rellim Kid Kare Konnect', description: 'Get help with your account, profile, billing, or job postings.' },
+  '/app':             { title: 'Dashboard | Rellim Kid Kare Konnect', description: 'Manage your jobs, applications, and messages.' },
+  '/profile':         { title: 'My Profile | Rellim Kid Kare Konnect', description: 'Complete and update your applicant profile.' },
+  '/partner/sign-up': { title: 'Become a Partner | Rellim Kid Kare Konnect', description: 'List your training program, consulting service, or daycare for sale on the Rellim Kid Kare Konnect partner directory.' },
+  '/partner/login':   { title: 'Partner Login | Rellim Kid Kare Konnect', description: 'Sign in to your Rellim Kid Kare Konnect partner account.' },
+};
+function seoFor(pathname) {
+  const p = ((pathname || '/').replace(/\/+$/, '') || '/').toLowerCase();
+  return SEO_BY_PATH[p] || SEO_BY_PATH['/'];
+}
+
+// Public marketing nav shown in the header to guests (and on mobile).
+// Each item resolves to a real URL via viewToPath().
+const PUBLIC_NAV = [
+  { label: 'Home',         view: 'welcome' },
+  { label: 'How It Works', view: 'howItWorks' },
+  { label: 'Daycares',     view: 'daycares' },
+  { label: 'Teachers',     view: 'teachers' },
+  { label: 'Jobs',         view: 'app', tab: 'jobs' },
+  { label: 'Pricing',      view: 'pricing' },
+  { label: 'Contact',      view: 'contact' },
+];
+
+// Legacy hash → clean URL redirects (e.g. /#daycares → /daycares).
+const HASH_REDIRECTS = {
+  '#daycares':     '/daycares',
+  '#teachers':     '/teachers',
+  '#pricing':      '/pricing',
+  '#how-it-works': '/how-it-works',
+  '#contact':      '/contact',
+  '#jobs':         '/jobs',
+};
+
 export default function App() {
   const [appLoaded, setAppLoaded] = useState(false);
   const [userType, setUserType] = useState(null);
@@ -1057,24 +1153,35 @@ export default function App() {
   const [policyError, setPolicyError] = useState('');
   const [realJobs, setRealJobs] = useState([]); // Active jobs posted to Supabase by real owners
 
-  // Browser back/forward integration. Each setView pushes a history entry,
-  // popstate restores the view, so the browser back button (and the in-app
-  // back arrow via window.history.back()) returns to the previous view.
+  // Browser back/forward integration. Every (view, tab) change pushes a
+  // real URL (e.g. /pricing, /jobs) to the history stack; popstate parses
+  // the URL back to the matching view. The browser address updates as the
+  // user navigates, so the back/forward buttons work and any page can be
+  // shared or bookmarked.
   const skipPushRef = useRef(false);
   const ourPushCountRef = useRef(0);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!window.history.state || !window.history.state.kkView) {
-      window.history.replaceState({ kkView: view }, '');
+    // First mount: redirect legacy hash links (/#daycares → /daycares) and
+    // make sure the history state matches the URL the user landed on.
+    if (window.location.hash && HASH_REDIRECTS[window.location.hash]) {
+      const target = HASH_REDIRECTS[window.location.hash];
+      window.history.replaceState({ kkPath: target }, '', target);
+    } else if (!window.history.state || !window.history.state.kkPath) {
+      window.history.replaceState({ kkPath: window.location.pathname }, '');
     }
     const onPop = (e) => {
-      const target = e.state && e.state.kkView;
-      if (target) {
-        skipPushRef.current = true;
-        setView(target);
-        if (ourPushCountRef.current > 0) ourPushCountRef.current -= 1;
-      }
+      const parsed = parsePath(window.location.pathname);
+      skipPushRef.current = true;
+      setView(parsed.view);
+      // Prefer the tab stored in history state (handles in-app tab nav
+      // where the URL stays '/app' but the active tab differs). Fall back
+      // to the tab parsed from the URL for paths like '/jobs'.
+      const stateTab = e?.state?.kkTab;
+      if (stateTab) setTab(stateTab);
+      else if (parsed.tab) setTab(parsed.tab);
+      if (ourPushCountRef.current > 0) ourPushCountRef.current -= 1;
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -1085,10 +1192,37 @@ export default function App() {
     if (typeof window === 'undefined') return;
     if (!appLoaded) return;
     if (skipPushRef.current) { skipPushRef.current = false; return; }
-    if (window.history.state && window.history.state.kkView === view) return;
-    window.history.pushState({ kkView: view }, '');
+    const desired = viewToPath(view, tab);
+    // Store both path and current tab so back/forward can fully restore
+    // the in-app tab even when several tabs share the '/app' URL.
+    if (window.location.pathname === desired) {
+      // Same URL but maybe the tab changed — update history state in place.
+      window.history.replaceState({ kkPath: desired, kkTab: tab }, '');
+      return;
+    }
+    window.history.pushState({ kkPath: desired, kkTab: tab }, '', desired);
     ourPushCountRef.current += 1;
-  }, [view, appLoaded]);
+  }, [view, tab, appLoaded]);
+
+  // Per-page SEO: keeps document.title and meta description in sync with
+  // the current URL so each route is uniquely indexable and shareable.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const seo = seoFor(viewToPath(view, tab));
+    document.title = seo.title;
+    const ensure = (selector, attr, name) => {
+      let el = document.head.querySelector(selector);
+      if (!el) {
+        el = document.createElement('meta');
+        el.setAttribute(attr, name);
+        document.head.appendChild(el);
+      }
+      return el;
+    };
+    ensure('meta[name="description"]', 'name', 'description').setAttribute('content', seo.description);
+    ensure('meta[property="og:title"]', 'property', 'og:title').setAttribute('content', seo.title);
+    ensure('meta[property="og:description"]', 'property', 'og:description').setAttribute('content', seo.description);
+  }, [view, tab]);
 
   const goBack = () => {
     if (typeof window !== 'undefined' && ourPushCountRef.current > 0) {
@@ -1196,7 +1330,16 @@ export default function App() {
           const { data: saved } = await kkLoadSavedCandidates(session.user.id);
           if (saved) setSavedCandidateIds(saved);
         }
-        setView('app');
+        // If the user landed at a specific URL (e.g. /pricing, /jobs), honor
+        // it. /  goes to the dashboard for signed-in users (preserving the
+        // pre-routing behavior). Unknown paths fall back to /app.
+        const landed = typeof window !== 'undefined' ? parsePath(window.location.pathname) : { view: 'app' };
+        if (window.location.pathname === '/' || landed.view === 'welcome') {
+          setView('app');
+        } else {
+          setView(landed.view);
+          if (landed.tab) setTab(landed.tab);
+        }
       } else {
         // No live session — fall back to the legacy localStorage hints just
         // so existing remembered signups keep working until they re-log in.
@@ -1205,6 +1348,19 @@ export default function App() {
           setUserType(auth.userType || null);
           setProfileComplete(auth.profileComplete || false);
           setPlan(auth.plan || null);
+        }
+        // Guest landing on a deep URL (e.g. /pricing, /daycares) should see
+        // that page directly — not get bounced to /. View routes that need
+        // auth (/app, /profile) redirect to /login to keep things safe.
+        if (typeof window !== 'undefined') {
+          const landed = parsePath(window.location.pathname);
+          const needsAuth = landed.view === 'app' || landed.view === 'profile';
+          if (needsAuth) {
+            setView('login');
+          } else if (landed.view !== 'welcome' || window.location.pathname === '/') {
+            setView(landed.view);
+            if (landed.tab) setTab(landed.tab);
+          }
         }
       }
       const sign = await STORE.get('kk_signup');
@@ -2663,18 +2819,36 @@ export default function App() {
       <>
       <header style={{ background: c.white, borderBottom: `1px solid ${c.border}`, position: 'sticky', top: 0, zIndex: 50 }}>
         <div className="max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between gap-2" style={{ minHeight: 68 }}>
-          <button onClick={() => setView(signedIn ? 'app' : 'welcome')} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><Logo /></button>
+          <a href={signedIn ? '/app' : '/'} onClick={(e) => { e.preventDefault(); setView(signedIn ? 'app' : 'welcome'); }} style={{ background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'none' }}><Logo /></a>
+          {/* Desktop nav. Guests see clean marketing routes; signed-in users
+              keep the in-app tab nav. Anchors carry real href values so the
+              browser address updates and right-click → Open in new tab works. */}
           <nav className="hidden md:flex items-center gap-1 flex-1 justify-center">
-            {tabs.map(t => (
-              <button key={t.id} onClick={() => { if (!signedIn && t.id !== 'licensing') { setGatedTab(t); return; } setView('app'); setTab(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 8, background: view === 'app' && tab === t.id ? c.paleBlue : 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.text, fontSize: 13, fontWeight: view === 'app' && tab === t.id ? 700 : 500, border: 'none', cursor: 'pointer', position: 'relative' }}>
-                <t.icon size={14} />{t.label}
-                {t.badge > 0 && <span style={{ background: c.coral, color: c.white, fontSize: 9.5, fontWeight: 700, padding: '1px 6px', borderRadius: 999, marginLeft: 2 }}>{t.badge}</span>}
-              </button>
-            ))}
+            {!signedIn ? (
+              PUBLIC_NAV.map(item => {
+                const active = (item.view === 'app' && item.tab === 'jobs' && view === 'app' && tab === 'jobs')
+                  || (item.view !== 'app' && view === item.view);
+                return (
+                  <a
+                    key={item.label}
+                    href={viewToPath(item.view, item.tab)}
+                    onClick={(e) => { e.preventDefault(); setView(item.view); if (item.tab) setTab(item.tab); }}
+                    style={{ padding: '7px 11px', borderRadius: 8, background: active ? c.paleBlue : 'transparent', color: active ? c.primary : c.text, fontSize: 13, fontWeight: active ? 700 : 500, textDecoration: 'none' }}
+                  >{item.label}</a>
+                );
+              })
+            ) : (
+              tabs.map(t => (
+                <button key={t.id} onClick={() => { setView('app'); setTab(t.id); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 11px', borderRadius: 8, background: view === 'app' && tab === t.id ? c.paleBlue : 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.text, fontSize: 13, fontWeight: view === 'app' && tab === t.id ? 700 : 500, border: 'none', cursor: 'pointer', position: 'relative' }}>
+                  <t.icon size={14} />{t.label}
+                  {t.badge > 0 && <span style={{ background: c.coral, color: c.white, fontSize: 9.5, fontWeight: 700, padding: '1px 6px', borderRadius: 999, marginLeft: 2 }}>{t.badge}</span>}
+                </button>
+              ))
+            )}
           </nav>
           <div className="flex items-center gap-1.5">
-            {(!signedIn || userType === 'owner') && (
-              <button onClick={() => setView('pricing')} style={{ padding: '7px 10px', background: 'none', border: 'none', color: c.primary, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', borderRadius: 7 }}>Pricing</button>
+            {signedIn && userType === 'owner' && (
+              <a href="/pricing" onClick={(e) => { e.preventDefault(); setView('pricing'); }} style={{ padding: '7px 10px', background: 'none', border: 'none', color: c.primary, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', borderRadius: 7, textDecoration: 'none' }}>Pricing</a>
             )}
             {signedIn ? (
               <>
@@ -2694,23 +2868,37 @@ export default function App() {
               </>
             ) : (
               <>
-                <button onClick={() => setView('login')} style={{ padding: '7px 10px', background: 'none', border: `1px solid ${c.border}`, color: c.text, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', borderRadius: 7 }}>Log In</button>
-                <button onClick={() => setView('roleChoice')} style={{ padding: '8px 14px', background: c.primary, color: c.white, border: 'none', borderRadius: 7, fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Sign Up</button>
+                <a href="/login" onClick={(e) => { e.preventDefault(); setView('login'); }} style={{ padding: '7px 10px', background: 'none', border: `1px solid ${c.border}`, color: c.text, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', borderRadius: 7, textDecoration: 'none' }}>Log In</a>
+                <a href="/sign-up" onClick={(e) => { e.preventDefault(); setView('roleChoice'); }} style={{ padding: '8px 14px', background: c.primary, color: c.white, border: 'none', borderRadius: 7, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', textDecoration: 'none' }}>Sign Up</a>
               </>
             )}
           </div>
         </div>
+        {/* Mobile nav: same guest/signed-in split as desktop. */}
         <div className="md:hidden relative" style={{ borderTop: `1px solid ${c.border}` }}>
           <div className="flex overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-            {tabs.map(t => (
-              <button key={t.id} onClick={() => { if (!signedIn && t.id !== 'licensing') { setGatedTab(t); return; } setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
-                <div style={{ position: 'relative' }}>
-                  <t.icon size={16} />
-                  {t.badge > 0 && <span style={{ position: 'absolute', top: -4, right: -8, background: c.coral, color: c.white, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, minWidth: 14, textAlign: 'center' }}>{t.badge}</span>}
-                </div>
-                {t.label}
-              </button>
-            ))}
+            {!signedIn ? (
+              PUBLIC_NAV.map(item => {
+                const active = (item.view === 'app' && item.tab === 'jobs' && view === 'app' && tab === 'jobs')
+                  || (item.view !== 'app' && view === item.view);
+                return (
+                  <a key={item.label}
+                    href={viewToPath(item.view, item.tab)}
+                    onClick={(e) => { e.preventDefault(); setView(item.view); if (item.tab) setTab(item.tab); }}
+                    style={{ flex: '0 0 auto', minWidth: 72, padding: '11px 10px', background: 'transparent', color: active ? c.primary : c.textMuted, fontSize: 11.5, fontWeight: 700, borderBottom: active ? `2px solid ${c.primary}` : '2px solid transparent', textAlign: 'center', whiteSpace: 'nowrap', textDecoration: 'none' }}>{item.label}</a>
+                );
+              })
+            ) : (
+              tabs.map(t => (
+                <button key={t.id} onClick={() => { setView('app'); setTab(t.id); }} style={{ flex: '0 0 auto', minWidth: 72, padding: '10px 10px', background: 'transparent', color: view === 'app' && tab === t.id ? c.primary : c.textMuted, fontSize: 10.5, fontWeight: 600, border: 'none', cursor: 'pointer', borderBottom: view === 'app' && tab === t.id ? `2px solid ${c.primary}` : '2px solid transparent', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, position: 'relative', whiteSpace: 'nowrap' }}>
+                  <div style={{ position: 'relative' }}>
+                    <t.icon size={16} />
+                    {t.badge > 0 && <span style={{ position: 'absolute', top: -4, right: -8, background: c.coral, color: c.white, fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 999, minWidth: 14, textAlign: 'center' }}>{t.badge}</span>}
+                  </div>
+                  {t.label}
+                </button>
+              ))
+            )}
           </div>
           <div aria-hidden="true" style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, background: `linear-gradient(to left, ${c.white}, rgba(255,255,255,0))`, pointerEvents: 'none' }} />
         </div>
@@ -2908,6 +3096,95 @@ export default function App() {
             <li>Center directors and administrators</li>
             <li>Training providers and trusted partners</li>
           </ul>
+        </PolicySection>
+      </StaticPage>
+    );
+  }
+
+  // HOW IT WORKS — explains the 3-step flow for teachers, daycares, partners.
+  if (view === 'howItWorks') {
+    return (
+      <StaticPage kicker="How It Works" title="How Rellim Kid Kare Konnect works" lead="A simple, organized way for Georgia daycare centers and childcare professionals to find each other — built around real licensing, real credentials, and real people.">
+        <PolicySection heading="For teachers and childcare professionals">
+          <ol style={{ paddingLeft: 20, margin: 0, lineHeight: 1.7 }}>
+            <li><strong>Create a free profile</strong> — your photo, city, credentials, CRC card, CPR card, references, and training hours.</li>
+            <li><strong>Get a Professional Readiness Score</strong> — a 100-point snapshot that tells centers, at a glance, how prepared you are to start work.</li>
+            <li><strong>Browse jobs and sub shifts within 30 miles</strong> and apply in one tap. Centers reach out directly through in-app messaging.</li>
+          </ol>
+          <div style={{ marginTop: 14 }}>
+            <button onClick={() => setView('roleChoice')} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>Sign up free as a teacher</button>
+          </div>
+        </PolicySection>
+        <PolicySection heading="For daycare centers">
+          <ol style={{ paddingLeft: 20, margin: 0, lineHeight: 1.7 }}>
+            <li><strong>Choose a subscription</strong> — Konnect Basic, Pro, Premium, or Elite. Each tier unlocks more posting limits, screening tools, and sub-shift access.</li>
+            <li><strong>Post a job in under two minutes</strong> with our Georgia-focused templates, or post a "Need a Sub Today" request to alert available teachers instantly.</li>
+            <li><strong>Review verified applicants</strong> — see their CRC card, CPR card, training hours, education, references, and Readiness Score before you ever pick up the phone.</li>
+          </ol>
+          <div style={{ marginTop: 14 }}>
+            <button onClick={() => setView('pricing')} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>See pricing for centers</button>
+          </div>
+        </PolicySection>
+        <PolicySection heading="For training providers, consultants, and listings">
+          Trusted training providers, compliance consultants, and even daycares for sale can list in our partner directory — visible to every Georgia center that uses the platform. <button onClick={() => setView('partnerSignup')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Become a partner</button>.
+        </PolicySection>
+        <PolicySection heading="Built for Georgia">
+          Every feature — the CRC card upload, the DECAL preservice training tips, the GELDS-aligned training tracking, the 30-mile job radius — is built around how Georgia childcare actually works. No out-of-state noise.
+        </PolicySection>
+      </StaticPage>
+    );
+  }
+
+  // DAYCARES — marketing landing page targeted at daycare owners/directors.
+  if (view === 'daycares') {
+    return (
+      <StaticPage kicker="For Daycares" title="Find qualified childcare staff for your daycare" lead="Connect with credentialed, background-checked teachers across Georgia. Post jobs in two minutes, alert subs in seconds, and screen applicants with a built-in Readiness Score.">
+        <PolicySection heading="What you get">
+          <ul style={{ paddingLeft: 20, margin: 0, lineHeight: 1.7 }}>
+            <li><strong>Verified applicants</strong> with CRC card, CPR card, training hours, and education already documented.</li>
+            <li><strong>Professional Readiness Score</strong> — 100-pt snapshot so you can compare candidates at a glance.</li>
+            <li><strong>Sub Shifts</strong> (Pro and up) — post a "Need a sub today" request and instantly notify available, qualified teachers near you.</li>
+            <li><strong>Trusted Teacher Network</strong> (Premium and up) — invite-only directory of your highest-rated regulars.</li>
+            <li><strong>One-click Request Interview</strong> and saved candidates so good profiles never get lost.</li>
+            <li><strong>Georgia-only focus</strong> — no out-of-state applicants cluttering your inbox.</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Plans for every size center">
+          From a single classroom on <strong>Konnect Basic</strong> to a multi-center owner on <strong>Konnect Elite</strong>, there's a plan that fits. Every plan starts with a 7-day free trial.
+          <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => setView('pricing')} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>See pricing</button>
+            <button onClick={() => beginSignup('owner')} style={{ padding: '10px 18px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>Sign up as a center</button>
+          </div>
+        </PolicySection>
+        <PolicySection heading="Already a member?">
+          <button onClick={() => setView('login')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Log in</button> to post a job, message applicants, or manage your subscription.
+        </PolicySection>
+      </StaticPage>
+    );
+  }
+
+  // TEACHERS — marketing landing page targeted at teachers/caregivers.
+  if (view === 'teachers') {
+    return (
+      <StaticPage kicker="For Teachers" title="Find childcare jobs near you" lead="A free, Georgia-focused way for teachers, caregivers, and childcare professionals to be discovered by the centers most likely to hire them.">
+        <PolicySection heading="Why teachers use Rellim Kid Kare Konnect">
+          <ul style={{ paddingLeft: 20, margin: 0, lineHeight: 1.7 }}>
+            <li><strong>Always free</strong> — your profile, applications, and messaging never cost anything.</li>
+            <li><strong>Jobs within 30 miles</strong> of your city, in one feed, so you're not scrolling through irrelevant postings.</li>
+            <li><strong>Pick up Sub Shifts</strong> and get paid for short-notice coverage at Georgia centers.</li>
+            <li><strong>Professional Readiness Score</strong> shows centers your CRC, CPR, training hours, education, and references in one verified snapshot.</li>
+            <li><strong>State licensing roadmap</strong> walks you through Georgia's DECAL CRC process, CPR/First Aid, preservice, and continuing-education requirements.</li>
+          </ul>
+        </PolicySection>
+        <PolicySection heading="Start in under five minutes">
+          Create your profile, upload your CRC card and CPR card with their valid-through dates, list your training hours, and you're ready to apply.
+          <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => beginSignup('worker')} style={{ padding: '10px 18px', background: c.primary, color: c.white, border: 'none', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>Sign up free</button>
+            <button onClick={() => { setView('app'); setTab('jobs'); }} style={{ padding: '10px 18px', background: c.white, color: c.primary, border: `1.5px solid ${c.primary}`, borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer' }}>Browse jobs first</button>
+          </div>
+        </PolicySection>
+        <PolicySection heading="Already have an account?">
+          <button onClick={() => setView('login')} style={{ color: c.primary, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Log in</button> to apply for jobs, pick up sub shifts, or update your profile.
         </PolicySection>
       </StaticPage>
     );
